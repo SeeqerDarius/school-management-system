@@ -62,3 +62,7 @@ desktop.ini
 tmp/
 .tmp/
 *.local
+
+# ---- Next.js generated agent files (root AGENTS.md is normative) ----
+apps/web/AGENTS.md
+apps/web/CLAUDE.md

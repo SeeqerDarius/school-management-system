@@ -1,0 +1,135 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens.
+ *
+ * Colour is semantic, never decorative (§93). `--color-success` means "paid, approved, active"
+ * everywhere in the product; it does not mean green, and a future rebrand changes the value
+ * without changing a single component.
+ *
+ * Colour is also never the *only* signal (§95). Every status in this application carries a word
+ * as well as a hue, because roughly one man in twelve cannot reliably distinguish the red from
+ * the green, and because a printed report card is often monochrome.
+ */
+@theme {
+  /* Neutrals — the structural palette most of the interface is built from. */
+  --color-surface: #ffffff;
+  --color-surface-sunken: #f6f7f9;
+  --color-surface-raised: #ffffff;
+  --color-border: #dfe3e8;
+  --color-border-strong: #c3cad3;
+  --color-ink: #16202c;
+  --color-ink-muted: #5b6875;
+  --color-ink-subtle: #7d8794;
+
+  /* Brand. A school's own accent is applied on top of these, constrained to accessible use. */
+  --color-primary: #1f5b8f;
+  --color-primary-hover: #17486f;
+  --color-primary-ink: #ffffff;
+  --color-primary-subtle: #eaf2f9;
+
+  /* Semantic states. */
+  --color-success: #17734a;
+  --color-success-subtle: #e7f4ed;
+  --color-warning: #8a5a00;
+  --color-warning-subtle: #fdf3e2;
+  --color-danger: #a62020;
+  --color-danger-subtle: #fbeaea;
+  --color-info: #1f5b8f;
+  --color-info-subtle: #eaf2f9;
+
+  --radius-control: 0.375rem;
+  --radius-panel: 0.5rem;
+}
+
+/*
+ * Dark mode.
+ *
+ * Contrast ratios are held above 4.5:1 for body text in both themes. Dark mode is not the light
+ * palette inverted: the neutrals are re-chosen, because inverted greys go muddy and the
+ * semantic hues need lifting to stay legible on a dark surface.
+ */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-surface: #111820;
+    --color-surface-sunken: #0b1016;
+    --color-surface-raised: #182029;
+    --color-border: #2a3541;
+    --color-border-strong: #3a4753;
+    --color-ink: #e8edf2;
+    --color-ink-muted: #a3aeba;
+    --color-ink-subtle: #8792a0;
+
+    --color-primary: #5ba3dd;
+    --color-primary-hover: #7bb6e6;
+    --color-primary-ink: #0b1016;
+    --color-primary-subtle: #14293c;
+
+    --color-success: #5fc490;
+    --color-success-subtle: #12291f;
+    --color-warning: #e0a64a;
+    --color-warning-subtle: #2c2314;
+    --color-danger: #ef8080;
+    --color-danger-subtle: #2e1717;
+    --color-info: #5ba3dd;
+    --color-info-subtle: #14293c;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-surface: #111820;
+  --color-surface-sunken: #0b1016;
+  --color-surface-raised: #182029;
+  --color-border: #2a3541;
+  --color-border-strong: #3a4753;
+  --color-ink: #e8edf2;
+  --color-ink-muted: #a3aeba;
+  --color-ink-subtle: #8792a0;
+  --color-primary: #5ba3dd;
+  --color-primary-hover: #7bb6e6;
+  --color-primary-ink: #0b1016;
+  --color-primary-subtle: #14293c;
+  --color-success: #5fc490;
+  --color-success-subtle: #12291f;
+  --color-warning: #e0a64a;
+  --color-warning-subtle: #2c2314;
+  --color-danger: #ef8080;
+  --color-danger-subtle: #2e1717;
+  --color-info: #5ba3dd;
+  --color-info-subtle: #14293c;
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background-color: var(--color-surface-sunken);
+  color: var(--color-ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Focus.
+ *
+ * Visible focus is not optional (§95). Anyone navigating by keyboard — which includes every
+ * screen reader user, and any teacher entering a hundred marks who has sensibly stopped
+ * reaching for the mouse — needs to see where they are.
+ */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 2px;
+  border-radius: var(--radius-control);
+}
+
+/* Respect a stated preference for less motion rather than overriding it. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

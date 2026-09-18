@@ -1,0 +1,25 @@
+{
+  "name": "sankofa-school-platform",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Multi-tenant School Management System and School ERP",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=24"
+  },
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=@sankofa/web",
+    "build": "npm run build --workspace=@sankofa/web",
+    "start": "npm run start --workspace=@sankofa/web",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e --workspace=@sankofa/web --if-present",
+    "rbac:generate": "node scripts/generate-rbac-seed.mjs",
+    "api:verify": "cd services/core-api && ./mvnw -B -ntp verify"
+  }
+}
