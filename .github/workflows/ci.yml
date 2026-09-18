@@ -1,0 +1,191 @@
+name: CI
+
+# Quality gates. A failure here blocks the merge — the gate is not advisory, and it is not
+# something to work around by weakening a rule or disabling a test (AGENTS.md §1).
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  JAVA_VERSION: '21'
+  JAVA_DISTRIBUTION: temurin
+
+jobs:
+  # ---------------------------------------------------------------------------------
+  # Secrets must never reach the repository. This runs first and fast, because every
+  # other job is wasted effort if a credential has already been committed.
+  # ---------------------------------------------------------------------------------
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject committed service-account files and private keys
+        run: |
+          set -euo pipefail
+          # Filenames that should never exist in the tree at all.
+          if git ls-files | grep -E '(serviceAccount.*\.json|firebase-adminsdk.*\.json|\.pem$|\.p12$|\.jks$|^\.env$)' ; then
+            echo "::error::A credential-shaped file is tracked in git. Remove it and rotate the credential."
+            exit 1
+          fi
+          # Content patterns. .env.example is excluded by name because it is deliberately
+          # full of dummy values that look like the real thing.
+          if git grep -nIE '(BEGIN (RSA|EC|OPENSSH|PGP) PRIVATE KEY|"private_key_id"|sk_live_[0-9a-zA-Z]{20,})' \
+               -- ':!.env.example' ':!.github/workflows/*' ; then
+            echo "::error::A secret-shaped literal is present in tracked content."
+            exit 1
+          fi
+
+      - name: Reject server secrets exposed to the browser
+        run: |
+          set -euo pipefail
+          # NEXT_PUBLIC_* is inlined into the client bundle. Anything secret behind that
+          # prefix is published to every visitor.
+          if git grep -nIE 'NEXT_PUBLIC_[A-Z0-9_]*(SECRET|PRIVATE|SERVICE_ACCOUNT|PASSWORD|TOKEN)' \
+               -- ':!.github/workflows/*' ; then
+            echo "::error::A secret is exposed through a NEXT_PUBLIC_ variable (AGENTS.md §1.5)."
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------------
+  # Backend: compile, unit tests, integration tests against real PostgreSQL.
+  # ---------------------------------------------------------------------------------
+  core-api:
+    name: Core API
+    runs-on: ubuntu-latest
+    needs: secret-scan
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: ${{ env.JAVA_DISTRIBUTION }}
+          cache: maven
+
+      # `verify` runs surefire (unit) and failsafe (integration). Integration tests start an
+      # embedded PostgreSQL and connect as a NON-SUPERUSER role, so row level security is
+      # actually exercised rather than bypassed. No Docker service container is needed.
+      - name: Build, test and verify
+        working-directory: services/core-api
+        run: ./mvnw -B -ntp verify
+
+      - name: Confirm the tenant isolation suite actually ran
+        working-directory: services/core-api
+        run: |
+          set -euo pipefail
+          report=target/failsafe-reports/TEST-io.sankofa.school.tenancy.TenantIsolationIT.xml
+          if [ ! -f "$report" ]; then
+            echo "::error::TenantIsolationIT did not run. A tenant-isolation defect is"
+            echo "::error::release-blocking, so a silently skipped suite is a build failure."
+            exit 1
+          fi
+          # A suite that runs zero tests passes trivially. Catch that too.
+          if grep -q 'tests="0"' "$report"; then
+            echo "::error::TenantIsolationIT reported zero tests."
+            exit 1
+          fi
+          echo "Tenant isolation suite ran:"
+          grep -o 'tests="[0-9]*" *[^>]*failures="[0-9]*"' "$report" | head -1
+
+      # Migrations are already validated for real by the integration tests: TestDatabase runs
+      # the full chain against an empty embedded PostgreSQL before any test executes, so a
+      # broken migration fails the build above. A separate flyway:validate step with no
+      # database would be theatre.
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: core-api-test-reports
+          path: |
+            services/core-api/target/surefire-reports/
+            services/core-api/target/failsafe-reports/
+            services/core-api/target/site/jacoco/
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------------
+  # The RBAC seed is generated from the Java constants. If someone edits the migration
+  # by hand, or adds a constant without regenerating, the two silently disagree.
+  # ---------------------------------------------------------------------------------
+  generated-files-are-current:
+    name: Generated files are current
+    runs-on: ubuntu-latest
+    needs: secret-scan
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Regenerate the RBAC seed and diff
+        run: |
+          set -euo pipefail
+          node scripts/generate-rbac-seed.mjs
+          if ! git diff --exit-code -- services/core-api/src/main/resources/db/migration/V0003__permission_catalogue.sql; then
+            echo "::error::V0003 is out of date with Permissions.java."
+            echo "::error::Run: node scripts/generate-rbac-seed.mjs — and do not hand-edit the migration."
+            exit 1
+          fi
+
+  # ---------------------------------------------------------------------------------
+  # Migrations are history. Editing an applied one breaks the checksum in every
+  # environment that already ran it (AGENTS.md §8).
+  # ---------------------------------------------------------------------------------
+  migrations-are-append-only:
+    name: Migrations are append-only
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Reject modification of an existing migration
+        run: |
+          set -euo pipefail
+          base="origin/${{ github.base_ref }}"
+          git fetch --no-tags --depth=50 origin "${{ github.base_ref }}"
+          changed=$(git diff --name-status "$base"...HEAD -- \
+            'services/core-api/src/main/resources/db/migration/**' || true)
+          # Added (A) is fine. Modified (M), Deleted (D) or Renamed (R) is not.
+          offenders=$(echo "$changed" | grep -E '^[MDR]' || true)
+          if [ -n "$offenders" ]; then
+            echo "::error::An already-merged migration was modified or removed:"
+            echo "$offenders"
+            echo "::error::Add a NEW migration instead. Applied history is not edited."
+            exit 1
+          fi
+          echo "Migration changes are additive only."
+
+  # ---------------------------------------------------------------------------------
+  # Dependency vulnerabilities.
+  # ---------------------------------------------------------------------------------
+  dependency-review:
+    name: Dependency review
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure

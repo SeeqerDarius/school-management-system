@@ -1,4 +1,4 @@
-package io.sankofa.school.platform.config;
+package io.sankofa.school.config;
 
 import io.sankofa.school.tenancy.TenantAwareDataSource;
 import org.springframework.beans.BeansException;

@@ -1,0 +1,69 @@
+name: CodeQL
+
+# Static analysis for the vulnerability classes that review misses: injection, unsafe
+# deserialisation, path traversal, SSRF. Runs on every change to main and weekly, because a
+# new query can find a flaw in code that has not changed since the last scan.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Mondays 03:17 UTC. Off the hour, so it does not queue behind everyone else's cron.
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: java-kotlin
+            build-mode: manual
+          - language: actions
+            build-mode: none
+          # javascript-typescript is added with apps/web, once there is source to scan.
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: temurin
+          cache: maven
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # security-extended adds lower-severity and higher-precision-cost queries. For a
+          # system holding children's records and a financial ledger, the extra scan time is
+          # not a meaningful cost.
+          queries: security-extended
+
+      # Compile only. Tests start an embedded PostgreSQL, which CodeQL does not need to
+      # observe and which would triple the scan time.
+      - name: Build
+        if: matrix.language == 'java-kotlin'
+        working-directory: services/core-api
+        run: ./mvnw -B -ntp -DskipTests compile
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: /language:${{ matrix.language }}

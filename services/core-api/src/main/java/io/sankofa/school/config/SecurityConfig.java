@@ -1,4 +1,4 @@
-package io.sankofa.school.platform.config;
+package io.sankofa.school.config;
 
 import io.sankofa.school.identity.auth.SessionAuthenticationFilter;
 import io.sankofa.school.platform.error.ApiError;
