@@ -1,0 +1,64 @@
+# ---- Secrets (NEVER commit) ----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+**/serviceAccount*.json
+**/firebase-adminsdk*.json
+**/*-service-account.json
+secrets/
+.secrets/
+
+# ---- Node ----
+node_modules/
+.next/
+out/
+build/
+dist/
+.turbo/
+*.tsbuildinfo
+.npm
+.eslintcache
+coverage/
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+
+# ---- Java ----
+target/
+!.mvn/wrapper/maven-wrapper.jar
+.gradle/
+*.class
+hs_err_pid*
+replay_pid*
+
+# ---- Firebase ----
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+database-debug.log
+pubsub-debug.log
+firebase-export-*/
+
+# ---- Vercel ----
+.vercel
+
+# ---- IDE / OS ----
+.idea/
+*.iml
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.sample.json
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Local scratch ----
+tmp/
+.tmp/
+*.local
