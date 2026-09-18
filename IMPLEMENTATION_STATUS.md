@@ -33,12 +33,19 @@ the system depends on being correct.
 
 | | |
 |---|---|
-| Migrations | 8, applying cleanly from an empty database |
-| Tests | **87 passing** — 52 unit, 35 integration |
-| Build | `./mvnw clean verify` green on JDK 25 LTS / Spring Boot 3.5.16 |
+| Migrations | 10, applying cleanly from an empty database |
+| Tests | **124 passing** — 71 unit, 53 integration |
+| Backend build | `./mvnw clean verify` green on JDK 25 LTS / Spring Boot 3.5.16 |
+| Web build | `typecheck`, `lint` and `next build` all clean on Next 16.3.5 / React 19 |
 | RBAC | 142 permissions, 26 system roles, 360 grants, cross-validated code ↔ database |
 | Architecture rules | 11 ArchUnit rules enforcing module boundaries |
-| CI | Secret scan, build+test, generated-file drift, append-only migrations, dependency review, CodeQL |
+| CI | Secret scan, backend build+test, web build, generated-file drift, append-only migrations, dependency review, CodeQL |
+
+One business module exists end to end — the **academic calendar** — and it is deliberately the
+reference pattern the rest copy: schema with RLS, domain state machine, repository with explicit
+tenant predicates, application service carrying the permission and the audit write, controller,
+and a test file covering isolation, the permission matrix, the state machine, the database
+constraints and the audit entries.
 
 ### A note on the toolchain
 
@@ -105,17 +112,29 @@ no session endpoint, so the system cannot currently be used by a human.
 | Subscription / entitlements | `NOT_STARTED` | — |
 | School / campus / branding | `NOT_STARTED` | — |
 
-## Phase 2 onward — business modules
+## Phase 2 — School structure
+
+| Item | Status | Evidence |
+|---|---|---|
+| Academic year lifecycle | `TESTED` | `AcademicCalendarApiIT` — permissions, isolation, transitions, constraints, audit |
+| Term lifecycle | `TESTED` | Same suite; terms cannot outlive their year or overlap each other |
+| Calendar state machine | `TESTED` | `CalendarStatusTest` — every legal and illegal transition, exhaustively |
+| Audit log | `FUNCTIONAL` | `audit.audit_log`, append-only by trigger *and* by revoked privilege |
+| Academic calendar UI | `FUNCTIONAL` | Renders at desktop and phone width, light and dark; **happy path unverified in-browser** |
+| Campus | `IN_PROGRESS` | Schema and domain type exist; **no service, no API, no UI** |
+| Branding | `IN_PROGRESS` | Schema only |
+
+## Phase 3 onward — business modules
 
 Every module below is `NOT_STARTED`. No schema, no service, no endpoint, no screen.
 
-Academics · Students · Guardians · Admissions · Enrolment & promotion · Attendance ·
-Timetable · Assessments · Grading & ranking · Report cards · Transcripts · Fees ·
+Students · Guardians · Admissions · Enrolment & promotion · Attendance · Timetable ·
+Subjects & classes · Assessments · Grading & ranking · Report cards · Transcripts · Fees ·
 Invoicing · Payments · Receipts · Refunds · Accounting · Chart of accounts · Journals ·
 Fiscal periods · Tax engine · Financial reports · HR · Leave · Payroll · Payslips ·
 Library · Inventory · Procurement · Assets · Transport · Hostel · Health · Discipline ·
 Counselling · Documents · Notifications · Email · SMS · E2EE messaging · Analytics ·
-Audit log · Platform Super Admin · Web application · PWA · All portals
+Platform Super Admin · PWA · Every portal except the one calendar screen
 
 ---
 
@@ -123,10 +142,17 @@ Audit log · Platform Super Admin · Web application · PWA · All portals
 
 Recorded here rather than left implicit, because an unrecorded gap becomes a surprise.
 
-1. **Firebase verification has never run against a real project.** The sign-in path is tested
-   end to end, but only through `StubIdentityTokenVerifier`. Signature, audience, issuer and
-   revocation checking are delegated to the Admin SDK and are correct by construction, not by
-   observation. No Firebase project has been provisioned.
+1. **Firebase verification has never run against a real project**, and this now blocks more than
+   itself. The sign-in path is tested end to end, but only through `StubIdentityTokenVerifier`;
+   signature, audience, issuer and revocation checking are delegated to the Admin SDK and are
+   correct by construction, not by observation.
+
+   The knock-on effect is that the **web-to-API seam cannot be exercised in a browser**. The
+   calendar UI has been verified rendering its layout, theming, responsive behaviour and error
+   state, but never its populated happy path — signing in requires a Firebase ID token that does
+   not exist. The API's own happy path is covered by the integration suite, so what is unproven
+   is specifically the join between the two tiers. Provisioning a Firebase project is the single
+   highest-value next step.
 2. **No rate limiting on sign-in.** §84 requires it and `bucket4j` is on the classpath, but
    nothing uses it yet. Credential stuffing against parent accounts is currently unthrottled —
    it is *recorded* (`SIGN_IN_REFUSED_NO_ACCOUNT`), but not slowed.
