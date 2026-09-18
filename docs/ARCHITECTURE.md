@@ -288,7 +288,7 @@ permissions, it only *hides* what the API would refuse anyway (§98).
 | Area | Decision | ADR |
 |---|---|---|
 | System of record | PostgreSQL, not Firestore | [0001](adr/0001-postgresql-as-system-of-record.md) |
-| Backend language | Java 21 LTS with Spring Boot | [0002](adr/0002-java-spring-boot-core-api.md) |
+| Backend language | Java 25 LTS with Spring Boot | [0002](adr/0002-java-spring-boot-core-api.md) |
 | Tenant isolation | RLS plus application layer, dual enforcement | [0003](adr/0003-tenant-isolation-strategy.md) |
 | Identity | Firebase Auth, database-authoritative authorization | [0004](adr/0004-firebase-auth-with-db-authorization.md) |
 | Accounting | Immutable posted journals, reversal-only correction | [0005](adr/0005-accounting-immutability.md) |

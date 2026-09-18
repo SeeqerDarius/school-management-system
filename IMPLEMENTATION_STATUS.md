@@ -33,12 +33,23 @@ the system depends on being correct.
 
 | | |
 |---|---|
-| Migrations | 4, applying cleanly from an empty database |
-| Tests | **76 passing** — 52 unit, 24 integration |
-| Build | `./mvnw verify` green on JDK 21 / Spring Boot 3.5.16 |
+| Migrations | 8, applying cleanly from an empty database |
+| Tests | **87 passing** — 52 unit, 35 integration |
+| Build | `./mvnw clean verify` green on JDK 25 LTS / Spring Boot 3.5.16 |
 | RBAC | 142 permissions, 26 system roles, 360 grants, cross-validated code ↔ database |
 | Architecture rules | 11 ArchUnit rules enforcing module boundaries |
 | CI | Secret scan, build+test, generated-file drift, append-only migrations, dependency review, CodeQL |
+
+### A note on the toolchain
+
+The project targets **Java 25 LTS**. It was originally built on 21; an automated upgrade agent
+bumped `java.version` to 25 mid-build, and rather than reverting it the combination was verified —
+the full suite passes on JDK 25 with Spring Boot 3.5.16. The only observed friction is a Mockito
+self-attachment warning, which is advisory and not a failure.
+
+That same agent auto-stashed uncommitted work when it switched branches; twelve files were
+recovered from `stash@{0}^3`. Nothing was lost, but it is the reason several commits landed in
+larger batches than intended.
 
 The isolation guarantee is the part worth trusting: tests connect as a **non-superuser** role,
 because a superuser bypasses Row Level Security unconditionally and would make every cross-tenant
@@ -84,9 +95,11 @@ no session endpoint, so the system cannot currently be used by a human.
 | Permission catalogue | `TESTED` | `PermissionCatalogueIT`, code ↔ database both directions |
 | System role templates | `TESTED` | Segregation-of-duties asserted for payroll, journals, teacher, platform admin |
 | Permission enforcement | `TESTED` | `PermissionAspectTest`, 9 tests, allow **and** deny for each rule |
-| Session resolution | `IN_PROGRESS` | `SessionResolver` written; **no test, no endpoint — unreachable** |
-| Firebase token verification | `NOT_STARTED` | Dependency present, no code |
-| MFA enforcement | `NOT_STARTED` | Schema columns exist only |
+| Session establishment | `TESTED` | `SessionApiIT`, 9 tests over real HTTP: sign in, choose school, act, sign out |
+| Session resolution | `TESTED` | `SessionResolver` + `identity.resolve_session`; covered by `SessionApiIT` |
+| Invitation-only sign-up | `TESTED` | A verified provider account with no invitation is refused, not provisioned |
+| Firebase token verification | `FUNCTIONAL` | `FirebaseIdentityTokenVerifier`; **exercised only through a stub — never against a live Firebase project** |
+| MFA enforcement | `IN_PROGRESS` | `mfa_required` is checked at sign-in and returns `MFA_REQUIRED`; **no enrolment flow, no test** |
 | Support access workflow | `IN_PROGRESS` | Schema only; no service, no UI, no audit wiring |
 | Outbox dispatch | `IN_PROGRESS` | Schema only; no poller |
 | Subscription / entitlements | `NOT_STARTED` | — |
@@ -110,20 +123,41 @@ Audit log · Platform Super Admin · Web application · PWA · All portals
 
 Recorded here rather than left implicit, because an unrecorded gap becomes a surprise.
 
-1. **Nothing can authenticate.** `SessionResolver` exists but there is no
-   `POST /api/v1/sessions` endpoint and no Firebase token verification, so no human can sign in.
-   This is the single largest blocker to anything being usable.
-2. **The outbox has no poller.** `platform.outbox` is written by nothing and drained by nothing,
+1. **Firebase verification has never run against a real project.** The sign-in path is tested
+   end to end, but only through `StubIdentityTokenVerifier`. Signature, audience, issuer and
+   revocation checking are delegated to the Admin SDK and are correct by construction, not by
+   observation. No Firebase project has been provisioned.
+2. **No rate limiting on sign-in.** §84 requires it and `bucket4j` is on the classpath, but
+   nothing uses it yet. Credential stuffing against parent accounts is currently unthrottled —
+   it is *recorded* (`SIGN_IN_REFUSED_NO_ACCOUNT`), but not slowed.
+3. **The outbox has no poller.** `platform.outbox` is written by nothing and drained by nothing,
    so `ARCHITECTURE.md` §6's description of event dispatch is currently aspirational.
-3. **CI has never run.** The workflows are written but the first push happened alongside them;
-   they are `FUNCTIONAL` on inspection, not verified green.
-4. **ADRs 0003, 0004, 0005, 0006, 0010, 0011, 0012 are referenced by `ARCHITECTURE.md` §8 but
+4. **CI has not yet been observed green.** Its first run failed because `mvnw` lacked the
+   executable bit; that is fixed, but the corrected pipeline has not completed a full pass.
+5. **ADRs 0003, 0004, 0005, 0006, 0010, 0011, 0012 are referenced by `ARCHITECTURE.md` §8 but
    not written.** Likewise `docs/SECURITY.md`, `DISASTER_RECOVERY.md`, `BACKUP_RESTORE.md`,
-   `ACCESSIBILITY.md`, `RELEASE_CHECKLIST.md`, `METRICS_CATALOG.md`. The links in
-   `ARCHITECTURE.md` are currently dead.
-5. **No `README.md`** at the repository root.
+   `ACCESSIBILITY.md`, `RELEASE_CHECKLIST.md`, `METRICS_CATALOG.md`. Those links are dead.
 6. **JaCoCo's coverage floor is 0.00.** It is wired but enforces nothing until there is enough
    code for a floor to be meaningful.
+7. **`LoginPathProbeIT` is a diagnostic, not a product test.** It was written to find the
+   bootstrapping bug below and is kept because it would catch a recurrence, but it asserts
+   plumbing rather than behaviour.
+
+### Three real defects found by testing, and what they were
+
+Recorded because each was invisible until something executed it, and each would have reached
+production looking fine:
+
+- **A `FOR ALL` policy's `USING` clause is evaluated on `SELECT` too.** Mine called the *raising*
+  tenant accessor, so every membership lookup on the sign-in path — which is unscoped by
+  definition — threw SQLSTATE 42501 and surfaced as an opaque 500. Fixed in `V0007`.
+- **RLS made the security log unwritable exactly when it mattered.** A *refused* sign-in has no
+  user and no tenant, which is precisely what the write policy rejected. Fixed in `V0006` with a
+  narrow `SECURITY DEFINER` writer, and the application role's direct `INSERT` was revoked so the
+  function is the only writer rather than merely the recommended one.
+- **`@ConditionalOnProperty` treats an empty value as present.** With `${FIREBASE_PROJECT_ID:}`
+  defaulting to an empty string, a developer without Firebase would have failed at boot. Replaced
+  with an explicit non-blank condition.
 
 ### Resolved since first draft
 

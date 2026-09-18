@@ -128,10 +128,14 @@ public class SessionService {
 
         // Through the SECURITY DEFINER writer: no context is bound yet, so a direct UPDATE
         // would be filtered by the app_user policy to zero rows — silently.
+        //
+        // singleRow() rather than query(Void.class): the function returns PostgreSQL's `void`
+        // type, and there is no conversion from that to java.lang.Void, so asking for one
+        // throws. The row is fetched and discarded.
         jdbc.sql("SELECT identity.record_sign_in(:userId)")
                 .param("userId", user.userId())
-                .query(Void.class)
-                .optional();
+                .query()
+                .singleRow();
 
         recordSecurityEvent(user.userId(),
                 user.newlyLinked() ? "ACCOUNT_LINKED" : "SIGN_IN_SUCCEEDED", ipAddress, userAgent);

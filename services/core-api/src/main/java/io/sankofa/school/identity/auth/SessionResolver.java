@@ -149,18 +149,24 @@ public class SessionResolver {
                 .list();
     }
 
+    /**
+     * Looks up the session.
+     *
+     * <p>Goes through {@code identity.resolve_session} rather than joining the tables directly:
+     * this runs before any context is bound — it is what establishes one — so the RLS policy on
+     * {@code identity.app_user} correctly hides every row and a direct join returns nothing.
+     * Loosening that policy is not an option; it is what stops one tenant enumerating the
+     * platform's users.
+     */
     private Optional<SessionRow> findSession(byte[] tokenHash) {
         return jdbc.sql("""
-                SELECT s.id, s.user_id, s.membership_id, s.issued_at, s.expires_at,
-                       s.revoked_at, s.mfa_satisfied,
-                       u.status AS user_status, u.sessions_valid_from
-                  FROM identity.user_session s
-                  JOIN identity.app_user u ON u.id = s.user_id
-                 WHERE s.token_hash = :tokenHash
+                SELECT session_id, user_id, membership_id, issued_at, expires_at,
+                       revoked_at, mfa_satisfied, user_status, sessions_valid_from
+                  FROM identity.resolve_session(:tokenHash)
                 """)
                 .param("tokenHash", tokenHash)
                 .query((rs, rowNum) -> new SessionRow(
-                        rs.getObject("id", UUID.class),
+                        rs.getObject("session_id", UUID.class),
                         rs.getObject("user_id", UUID.class),
                         rs.getObject("membership_id", UUID.class),
                         rs.getObject("issued_at", java.time.OffsetDateTime.class).toInstant(),
