@@ -135,8 +135,12 @@ class ModuleBoundaryTest {
                     .optionalLayer("Application").definedBy("..application..")
                     .optionalLayer("Domain").definedBy("..domain..")
                     .optionalLayer("Persistence").definedBy("..repository..", "..persistence..")
-                    .whereLayer("Web").mayNotBeAccessedByAnyLayer()
-                    .whereLayer("Application").mayOnlyBeAccessedByLayers("Web")
+                    // Web may be accessed by Web — two controllers sharing a request or response
+                    // record is ordinary and desirable. What must never happen is a layer
+                    // *beneath* Web depending on it: a service that knows about an HTTP DTO has
+                    // put presentation concerns inside a business rule.
+                    .whereLayer("Web").mayOnlyBeAccessedByLayers("Web")
+                    .whereLayer("Application").mayOnlyBeAccessedByLayers("Web", "Application")
                     .whereLayer("Persistence").mayOnlyBeAccessedByLayers("Application", "Domain")
                     .allowEmptyShould(true)
                     .because("a repository called straight from a controller skips the "

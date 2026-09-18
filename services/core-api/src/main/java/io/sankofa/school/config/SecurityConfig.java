@@ -3,7 +3,7 @@ package io.sankofa.school.config;
 import io.sankofa.school.identity.auth.SessionAuthenticationFilter;
 import io.sankofa.school.platform.error.ApiError;
 import io.sankofa.school.platform.error.ErrorCode;
-import io.sankofa.school.platform.web.CorrelationIdFilter;
+import io.sankofa.school.platform.context.CorrelationId;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -97,6 +97,6 @@ public class SecurityConfig {
         response.setStatus(code.httpStatus());
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         objectMapper.writeValue(response.getOutputStream(),
-                ApiError.of(code, message, CorrelationIdFilter.current()));
+                ApiError.of(code, message, CorrelationId.current()));
     }
 }

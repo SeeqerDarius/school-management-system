@@ -1,11 +1,12 @@
 package io.sankofa.school.platform.error;
 
 import io.sankofa.school.platform.money.CurrencyMismatchException;
-import io.sankofa.school.platform.web.CorrelationIdFilter;
+import io.sankofa.school.platform.context.CorrelationId;
 import jakarta.validation.ConstraintViolation;
 import jakarta.validation.ConstraintViolationException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
@@ -44,7 +45,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<ApiError> handleApi(ApiException e) {
-        String correlationId = CorrelationIdFilter.current();
+        String correlationId = CorrelationId.current();
         // Client errors are expected traffic; only server-side codes deserve an ERROR line.
         if (e.code().httpStatus() >= 500) {
             log.error("[{}] {}", correlationId, e.getMessage(), e);
@@ -83,7 +84,7 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ApiError> handleMalformed(Exception e) {
         // The exception message can quote the request body, which may contain personal data or
         // a password field. It is logged at DEBUG only and never returned.
-        log.debug("[{}] Malformed request", CorrelationIdFilter.current(), e);
+        log.debug("[{}] Malformed request", CorrelationId.current(), e);
         return respond(ErrorCode.BAD_REQUEST, "The request could not be read", Map.of());
     }
 
@@ -95,7 +96,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AccessDeniedException.class)
     public ResponseEntity<ApiError> handleAccessDenied(AccessDeniedException e) {
         // Logged at INFO: a burst of these is a meaningful security signal (§179).
-        log.info("[{}] Access denied: {}", CorrelationIdFilter.current(), e.getMessage());
+        log.info("[{}] Access denied: {}", CorrelationId.current(), e.getMessage());
         return respond(ErrorCode.FORBIDDEN,
                 "You do not have permission to perform this action", Map.of());
     }
@@ -109,14 +110,67 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DuplicateKeyException.class)
     public ResponseEntity<ApiError> handleDuplicate(DuplicateKeyException e) {
         // The driver message names the index, which discloses schema. Log it, do not return it.
-        log.info("[{}] Uniqueness violation", CorrelationIdFilter.current(), e);
+        log.info("[{}] Uniqueness violation", CorrelationId.current(), e);
         return respond(ErrorCode.CONFLICT, "A record with these details already exists", Map.of());
+    }
+
+    /**
+     * A constraint the database enforces that the service layer could not.
+     *
+     * <p>The important case is {@code 23P01}, an exclusion-constraint violation — two academic
+     * years overlapping, two terms overlapping, a double-booked room. Those are rules that
+     * <em>must</em> live in the database, because two administrators submitting simultaneously
+     * both pass any read-then-check the application could perform.
+     *
+     * <p>They are user errors, not server errors, so they return 409 rather than falling through
+     * to the catch-all and reporting a 500 for something the user can simply fix.
+     */
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiError> handleDataIntegrity(DataIntegrityViolationException e) {
+        String sqlState = sqlStateOf(e);
+        String correlationId = CorrelationId.current();
+
+        if ("23P01".equals(sqlState)) {
+            log.info("[{}] Exclusion constraint violation", correlationId, e);
+            return respond(ErrorCode.CONFLICT,
+                    "That date range overlaps one that already exists", Map.of());
+        }
+        if ("23505".equals(sqlState)) {
+            log.info("[{}] Uniqueness violation", correlationId, e);
+            return respond(ErrorCode.CONFLICT,
+                    "A record with these details already exists", Map.of());
+        }
+        if ("23514".equals(sqlState) || "23503".equals(sqlState)) {
+            log.info("[{}] Constraint violation (SQLState {})", correlationId, sqlState, e);
+            return respond(ErrorCode.CONFLICT,
+                    "That change conflicts with a rule this record must satisfy", Map.of());
+        }
+
+        // Anything else is genuinely unexpected and deserves the loud treatment.
+        log.error("[{}] Unclassified data integrity violation (SQLState {})",
+                correlationId, sqlState, e);
+        return respond(ErrorCode.INTERNAL_ERROR,
+                "Something went wrong. Quote reference " + correlationId + " to support.",
+                Map.of());
+    }
+
+    /** Walks the cause chain for the driver's SQLState, which Spring's wrapper hides. */
+    private static String sqlStateOf(Throwable e) {
+        for (Throwable cause = e; cause != null; cause = cause.getCause()) {
+            if (cause instanceof SQLException sql) {
+                return sql.getSQLState();
+            }
+            if (cause.getCause() == cause) {
+                break;
+            }
+        }
+        return null;
     }
 
     @ExceptionHandler(CurrencyMismatchException.class)
     public ResponseEntity<ApiError> handleCurrencyMismatch(CurrencyMismatchException e) {
         log.error("[{}] Currency mismatch: {} vs {}",
-                CorrelationIdFilter.current(), e.left(), e.right(), e);
+                CorrelationId.current(), e.left(), e.right(), e);
         return respond(ErrorCode.ACCOUNTING_INVARIANT,
                 "Amounts in different currencies cannot be combined", Map.of());
     }
@@ -130,7 +184,7 @@ public class GlobalExceptionHandler {
      */
     @ExceptionHandler(SQLException.class)
     public ResponseEntity<ApiError> handleSql(SQLException e) {
-        String correlationId = CorrelationIdFilter.current();
+        String correlationId = CorrelationId.current();
         if ("42501".equals(e.getSQLState())) {
             log.error("[{}] TENANT SCOPING FAILURE — a query ran without a bound tenant. "
                     + "This is a defect, not a client error.", correlationId, e);
@@ -144,7 +198,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiError> handleUnexpected(Exception e) {
-        String correlationId = CorrelationIdFilter.current();
+        String correlationId = CorrelationId.current();
         log.error("[{}] Unhandled exception", correlationId, e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                 .body(ApiError.of(ErrorCode.INTERNAL_ERROR,
@@ -154,7 +208,7 @@ public class GlobalExceptionHandler {
 
     private static ResponseEntity<ApiError> respond(ErrorCode code, String message,
                                                     Map<String, String> fields) {
-        String correlationId = CorrelationIdFilter.current();
+        String correlationId = CorrelationId.current();
         return ResponseEntity.status(code.httpStatus())
                 .body(ApiError.of(code, message, correlationId, fields));
     }
