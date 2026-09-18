@@ -88,7 +88,10 @@ no session endpoint, so the system cannot currently be used by a human.
 | Environment template | `DOCUMENTED` | `.env.example`, dummy values only |
 | CI pipeline | `FUNCTIONAL` | `.github/workflows/ci.yml`, `codeql.yml` — **not yet observed green on GitHub** |
 | Firebase project | `NOT_STARTED` | No project provisioned, no rules written |
-| Vercel deployment | `NOT_STARTED` | — |
+| Container image | `FUNCTIONAL` | Dockerfile written; layered extraction and launcher layout verified locally. **Image never built — no Docker available** |
+| Deployment documentation | `DOCUMENTED` | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), including a production smoke test |
+| Release workflow | `FUNCTIONAL` | `.github/workflows/release.yml` — tag or manual only; publishes to GHCR, deploys nothing |
+| Vercel deployment | `NOT_STARTED` | No project linked. Nothing is deployed anywhere |
 
 ## Phase 1 — Identity and tenancy
 

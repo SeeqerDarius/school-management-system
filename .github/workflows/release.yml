@@ -1,0 +1,172 @@
+name: Release
+
+# Publishes a container image for services/core-api.
+#
+# NOTHING HERE RUNS ON A PUSH TO MAIN. It fires only on a version tag or when a human clicks
+# "Run workflow". Publishing an artefact is an outward-facing act and should be a decision
+# somebody makes, not a side effect of merging.
+#
+# The image goes to GHCR rather than to a specific platform's registry, because where the API
+# will run has not been decided. GHCR is neutral: Cloud Run, Railway, Fly.io and Vercel's
+# container runtime can all pull from it.
+#
+# This workflow does NOT deploy. Vercel deploys the web tier through its own GitHub integration
+# once the project is linked; the API is deployed by whichever host is chosen, from the image
+# this produces. See docs/DEPLOYMENT.md.
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Image tag to publish (defaults to the short commit SHA)'
+        required: false
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  JAVA_VERSION: '25'
+  REGISTRY: ghcr.io
+
+jobs:
+  # ---------------------------------------------------------------------------------
+  # Never publish an image from a commit that has not passed its tests. The quality gate
+  # is re-run here rather than trusted from an earlier CI run, because a tag can point at
+  # any commit — including one that never ran CI at all.
+  # ---------------------------------------------------------------------------------
+  verify:
+    name: Verify before publishing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      - name: Backend tests
+        working-directory: services/core-api
+        run: ./mvnw -B -ntp verify
+
+      - name: Confirm the tenant isolation suite ran
+        working-directory: services/core-api
+        run: |
+          set -euo pipefail
+          report=target/failsafe-reports/TEST-io.sankofa.school.tenancy.TenantIsolationIT.xml
+          if [ ! -f "$report" ] || grep -q 'tests="0"' "$report"; then
+            echo "::error::Refusing to publish: the tenant isolation suite did not run."
+            exit 1
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Web build
+        env:
+          CORE_API_BASE_URL: http://localhost:8080
+          SESSION_SECRET: ci-placeholder-value-never-used-for-anything-real
+        run: |
+          npm ci --no-audit --no-fund
+          npm run typecheck --workspaces --if-present
+          npm run lint --workspaces --if-present
+          npm run build
+
+  # ---------------------------------------------------------------------------------
+  # Build and publish.
+  # ---------------------------------------------------------------------------------
+  image:
+    name: Publish core-api image
+    runs-on: ubuntu-latest
+    needs: verify
+    permissions:
+      contents: read
+      packages: write
+      # For build provenance, so the image can be traced back to the commit that produced it.
+      id-token: write
+      attestations: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Authenticate to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive image tags
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/core-api
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            type=raw,value=${{ inputs.tag }},enable=${{ inputs.tag != '' }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: services/core-api
+          file: services/core-api/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+
+      # Signs a statement that this image came from this commit via this workflow, so a
+      # deployment can verify it is running what the repository says it is running.
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ${{ env.REGISTRY }}/${{ github.repository }}/core-api
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+      - name: Scan the published image
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ github.repository }}/core-api@${{ steps.build.outputs.digest }}
+          format: table
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          # Reports without failing. The image is already published by this point, so failing
+          # here would only hide the finding; the useful outcome is that somebody reads it and
+          # cuts a new release. Change to exit-code 1 and move this ahead of the push once a
+          # baseline of accepted findings exists.
+          exit-code: '0'
+
+      - name: Summary
+        run: |
+          {
+            echo "### Published"
+            echo ""
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo ""
+            echo "Digest: \`${{ steps.build.outputs.digest }}\`"
+            echo ""
+            echo "This workflow does not deploy. See docs/DEPLOYMENT.md."
+          } >> "$GITHUB_STEP_SUMMARY"

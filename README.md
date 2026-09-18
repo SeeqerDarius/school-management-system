@@ -122,6 +122,7 @@ a published facade, and cross-module writes go through the transactional outbox.
 | [DATA_PRIVACY.md](docs/DATA_PRIVACY.md) | Lawful basis per purpose, role-by-field visibility, retention |
 | [TESTING.md](docs/TESTING.md) | The seven mandatory test categories and how to write them |
 | [INCIDENT_RESPONSE.md](docs/INCIDENT_RESPONSE.md) | What to do when something is wrong in production |
+| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | What deployment requires, and what is not ready for it |
 | [docs/adr/](docs/adr/) | Why each significant decision was made, and what it cost |
 
 ---
