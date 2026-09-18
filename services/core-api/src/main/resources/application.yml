@@ -1,0 +1,122 @@
+# =====================================================================================
+# Core API — base configuration.
+#
+# No secret appears in this file, in any profile of it, or in any file under source control
+# (§85, §162). Every credential arrives from the environment. `.env.example` at the repository
+# root documents the full set with dummy values.
+#
+# TWO DATABASE IDENTITIES, DELIBERATELY
+#   spring.datasource.*  the RUNTIME role. Not the table owner, no BYPASSRLS, no superuser.
+#                        Row Level Security applies to it, which is the entire point.
+#   spring.flyway.*      the MIGRATION role. Owns the schemas, holds BYPASSRLS.
+#
+# Giving both the same credentials would either break migrations or — far worse — silently
+# disable RLS for the application while every test still passed. See
+# docs/adr/0003-tenant-isolation-strategy.md.
+# =====================================================================================
+
+spring:
+  application:
+    name: core-api
+
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_APP_USER}
+    password: ${DB_APP_PASSWORD}
+    hikari:
+      pool-name: sankofa-app
+      maximum-pool-size: ${DB_POOL_MAX:20}
+      minimum-idle: ${DB_POOL_MIN:2}
+      connection-timeout: 10000
+      max-lifetime: 1500000
+      # A leaked connection keeps its tenant session variables until it is returned.
+      # Surfacing the leak quickly matters more than tolerating it.
+      leak-detection-threshold: 20000
+
+  flyway:
+    enabled: true
+    url: ${DB_URL}
+    user: ${DB_MIGRATE_USER}
+    password: ${DB_MIGRATE_PASSWORD}
+    schemas: public
+    locations: classpath:db/migration
+    # Checksum drift fails the build rather than being repaired in place: an already-applied
+    # migration is history, and history is not edited (AGENTS.md §8).
+    validate-on-migrate: true
+    clean-disabled: true
+    placeholders:
+      appRole: ${DB_APP_ROLE:sankofa_app}
+      migrateRole: ${DB_MIGRATE_ROLE:sankofa_migrate}
+
+  jackson:
+    default-property-inclusion: non_null
+    deserialization:
+      fail-on-unknown-properties: false
+    serialization:
+      write-dates-as-timestamps: false
+
+  threads:
+    virtual:
+      enabled: true
+
+server:
+  port: ${PORT:8080}
+  error:
+    # Never let the container render its own error page: it leaks the exception type and path.
+    # GlobalExceptionHandler produces every error body this service returns.
+    include-message: never
+    include-stacktrace: never
+    include-binding-errors: never
+    whitelabel:
+      enabled: false
+  shutdown: graceful
+  forward-headers-strategy: framework
+
+management:
+  endpoints:
+    web:
+      exposure:
+        # Deliberately narrow. Adding an endpoint here is a security decision, not a convenience.
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
+      probes:
+        enabled: true
+  metrics:
+    tags:
+      application: core-api
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    # Interactive docs are a development affordance. Production exposure is opt-in per
+    # environment, never on by default.
+    enabled: ${SWAGGER_UI_ENABLED:false}
+
+sankofa:
+  firebase:
+    project-id: ${FIREBASE_PROJECT_ID:}
+    # Path to a service-account file, or empty to use Application Default Credentials.
+    # The file itself is never committed; .gitignore blocks the filename patterns.
+    credentials-path: ${FIREBASE_CREDENTIALS_PATH:}
+    storage-bucket: ${FIREBASE_STORAGE_BUCKET:}
+  session:
+    ttl: ${SESSION_TTL:PT12H}
+    # Privileged memberships get a shorter window; see docs/SECURITY.md.
+    privileged-ttl: ${SESSION_PRIVILEGED_TTL:PT2H}
+  outbox:
+    poll-interval: ${OUTBOX_POLL_INTERVAL:PT5S}
+    batch-size: ${OUTBOX_BATCH_SIZE:100}
+    max-attempts: ${OUTBOX_MAX_ATTEMPTS:8}
+
+logging:
+  level:
+    root: INFO
+    io.sankofa.school: ${LOG_LEVEL:INFO}
+  pattern:
+    # The correlation id is in every line, because tracing a school's report of "it failed
+    # yesterday afternoon" back to a request is otherwise guesswork.
+    console: "%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level [%X{correlationId:-}] %logger{36} - %msg%n"
