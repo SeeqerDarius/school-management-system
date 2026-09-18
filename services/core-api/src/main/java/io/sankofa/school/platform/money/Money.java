@@ -229,7 +229,10 @@ public final class Money implements Comparable<Money> {
 
     @Override
     public int hashCode() {
-        return Objects.hash(amount.stripTrailingZeros(), currency);
+        // Every instance is normalised to SCALE in the constructor, so two equal amounts always
+        // have the same scale and BigDecimal.hashCode is consistent with equals here.
+        // stripTrailingZeros() would NOT be safe: its behaviour on zero has varied across JDKs.
+        return Objects.hash(amount, currency);
     }
 
     @Override
