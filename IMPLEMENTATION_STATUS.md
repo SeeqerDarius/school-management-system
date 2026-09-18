@@ -132,8 +132,12 @@ Recorded here rather than left implicit, because an unrecorded gap becomes a sur
    it is *recorded* (`SIGN_IN_REFUSED_NO_ACCOUNT`), but not slowed.
 3. **The outbox has no poller.** `platform.outbox` is written by nothing and drained by nothing,
    so `ARCHITECTURE.md` §6's description of event dispatch is currently aspirational.
-4. **CI has not yet been observed green.** Its first run failed because `mvnw` lacked the
-   executable bit; that is fixed, but the corrected pipeline has not completed a full pass.
+4. **CodeQL results are not published, and its gate is currently soft.** The analysis runs and
+   its findings appear in the job log, but uploading to the Security tab requires code scanning
+   to be enabled — which for a private repository means GitHub Advanced Security. The analyze
+   step carries `continue-on-error: true` so CI is not permanently red over a billing
+   entitlement. **This weakens the gate**: a genuine CodeQL failure is tolerated while that line
+   is there. Remove it as soon as code scanning is enabled.
 5. **ADRs 0003, 0004, 0005, 0006, 0010, 0011, 0012 are referenced by `ARCHITECTURE.md` §8 but
    not written.** Likewise `docs/SECURITY.md`, `DISASTER_RECOVERY.md`, `BACKUP_RESTORE.md`,
    `ACCESSIBILITY.md`, `RELEASE_CHECKLIST.md`, `METRICS_CATALOG.md`. Those links are dead.
