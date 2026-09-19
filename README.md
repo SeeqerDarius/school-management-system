@@ -25,14 +25,16 @@ out anything probabilistic by design, not by omission.
 | Layer | Technology | Why |
 | --- | --- | --- |
 | Application | Next.js 16 (App Router), React 19, TypeScript strict | Server Components read, Server Actions write — no HTTP API between the page and the database |
-| System of record | PostgreSQL on [Neon](https://neon.tech) | Relational integrity for ledgers, grades and payroll |
+| System of record | PostgreSQL on [Supabase](https://supabase.com) | Relational integrity for ledgers, grades and payroll |
 | Data access | Prisma 6, through a tenant-scoped client | The tenant filter is injected, not remembered |
 | Identity | NextAuth (credentials) + bcrypt | Invitation-only accounts; no self-service registration |
 | Hosting | Vercel | One deployment surface, one set of credentials |
 
 Full detail in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). The decision to collapse an earlier
 two-service design into this one — including what got *worse* — is recorded in
-[ADR 0010](docs/adr/0010-nextjs-fullstack-on-vercel.md). The rules for changing code live in
+[ADR 0010](docs/adr/0010-nextjs-fullstack-on-vercel.md), and the move from Neon to Supabase, with
+the internet-facing API that came with it, in
+[ADR 0011](docs/adr/0011-supabase-as-the-postgresql-host.md). The rules for changing code live in
 [AGENTS.md](AGENTS.md).
 
 ### The one thing worth understanding first
@@ -55,26 +57,31 @@ Two tests hold that in place, and both are release gates:
   attacker would: can I read their row knowing its id, change it, delete it, write into their
   school by claiming to be them.
 
-PostgreSQL row-level security is **not yet in place** and is the top item in
-[IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md). The extension is structural, which beats a
-convention, but it lives in the application and RLS does not.
+Row-level security **is** on every table — but as a deny-all wall around Supabase's Data API, not
+as tenant isolation. Prisma connects as `postgres`, which has `BYPASSRLS`, so those policies are
+skipped for the application's own queries. Do not read "RLS is on" as "the database enforces
+tenancy": that needs per-tenant policies *and* a non-bypassing role, in that order, and it is the
+top item in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
 
 ---
 
 ## Running it locally
 
-You need **Node 22 or later** and a PostgreSQL database. Neon's free tier is the path of least
-resistance and is what production uses.
+You need **Node 22 or later** and a PostgreSQL database. Supabase's free tier is what
+production uses.
 
 ### 1. Get a database
 
-Sign in at [neon.tech](https://neon.tech), create a project, and open **Connection Details**. You
-need two strings from there:
+Sign in at [supabase.com](https://supabase.com), create a project, then open **Connect → ORMs →
+Prisma**. That panel gives you both strings already shaped for this application:
 
-- the **pooled** one (its host contains `-pooler`) — this is `DATABASE_URL`
-- the **direct** one — this is `DIRECT_URL`
+- the **transaction** pooler (port 6543) — this is `DATABASE_URL`
+- the **session** pooler (port 5432) — this is `DIRECT_URL`
 
-Migrations issue statements a transaction pooler cannot carry, which is why there are two.
+Migrations issue statements a transaction pooler cannot carry, which is why there are two. Copy
+them from the dashboard rather than composing them: the pooler hostname is not derivable from the
+region, and the `db.<project-ref>.supabase.co` host you may see elsewhere is IPv6-only and will
+simply time out. `.env.example` explains every flag on those URLs and why it is there.
 
 ### 2. Configure
 
@@ -124,9 +131,10 @@ academic calendar.
 | `npm run lint` | ESLint. Separate from the build — Next 16 no longer runs it |
 | `npm test` | Fast tests: pure functions, no database |
 | `npm run test:db` | Tenant isolation and database constraints, against real PostgreSQL |
-| `npm run db:migrate` | Create and apply a migration in development |
+| `npm run db:migrate` | Create and apply a migration — refuses any non-local database |
 | `npm run db:deploy` | Apply existing migrations (this is what CI and production run) |
 | `npm run db:seed` | Permission catalogue, system roles, and a demo school outside production |
+| `npm run db:reset` | Drop and recreate — refuses any non-local database |
 | `npm run db:studio` | Prisma Studio, for looking at the data |
 
 `npm test` and `npm run test:db` are deliberately separate. The database suites are excluded from

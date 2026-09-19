@@ -26,8 +26,8 @@ Next.js 16 on Vercel  ───────────────────�
    │                                                    │
    │  Prisma, through a tenant-scoped client            │
    ▼                                                    │
-PostgreSQL on Neon ─────────────────────────────────────┘
-   pooled endpoint for the app, direct endpoint for migrations
+PostgreSQL on Supabase ─────────────────────────────────┘
+   Supavisor transaction mode for the app, session mode for migrations
 ```
 
 There is no HTTP API between the page and the database, because there is nothing on the other side
@@ -65,13 +65,20 @@ into every `where` and every `create`, and **throws** on any operation it does n
 than letting it run unscoped. The tenant is resolved from the authenticated principal's
 **membership**, never from a request header, body, query parameter or subdomain.
 
-> **Known weakness, stated plainly.** PostgreSQL row-level security is *not yet in place*. The
-> extension lives in the application; a `$queryRaw` bypasses it. RLS would enforce the same rule
-> below anything application code can reach, and it is the top item in
-> [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md). Until it lands, the guard is
-> `src/server/tenantScopeCoverage.test.ts`, which fails the build if a model gains a `tenantId`
-> and is not scoped, and `tests/db/tenant-isolation.test.ts`, which proves the behaviour against
-> real PostgreSQL.
+> **Known weakness, stated plainly.** Row-level security *is* enabled on every table, but as a
+> deny-all wall around Supabase's Data API — not as tenant isolation. Prisma connects as
+> `postgres`, which carries `BYPASSRLS`, so those policies are skipped for this application's own
+> queries. Tenant isolation therefore still rests entirely on the client extension, which lives in
+> the application: a `$queryRaw` bypasses it.
+>
+> Do not read "RLS is on" as "the database enforces tenancy". Making it so means per-tenant
+> policies *plus* a connection role without `BYPASSRLS`, in that order — point a non-bypassing role
+> at today's policy-less tables and every query in the product returns nothing. It is the top item
+> in [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md).
+>
+> Until it lands the guards are `src/server/tenantScopeCoverage.test.ts`, which fails the build if
+> a model gains a `tenantId` and is not scoped, and `tests/db/tenant-isolation.test.ts`, which
+> proves the behaviour against real PostgreSQL.
 
 ### I-2 Money is decimal and carries its currency
 

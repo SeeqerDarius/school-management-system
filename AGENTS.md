@@ -64,11 +64,11 @@ npm test                    # fast tests: pure functions, no database
 npm run test:db             # tenant isolation and database constraints, real PostgreSQL
 npm run build               # production build
 
-npm run db:migrate          # create and apply a migration in development
-npm run db:deploy           # apply existing migrations (CI and production)
+npm run db:migrate          # create and apply a migration — refuses a non-local database
+npm run db:deploy           # apply existing migrations (CI and production). Only ever adds
 npm run db:seed             # permission catalogue, system roles, demo school outside production
 npm run db:studio           # look at the data
-npm run db:reset            # destroy and recreate — development only
+npm run db:reset            # drop and recreate — refuses a non-local database
 ```
 
 `npm test` and `npm run test:db` are separate on purpose. The database suites are *excluded* from
@@ -110,6 +110,11 @@ is missing is a suite that stops running and never says so.
 ### Prisma and SQL
 
 - One migration per logical change. Never edit one that has been merged.
+- **A migration that creates a table ends by enabling row-level security on it.** Copy the RLS
+  block from `20260919092000_data_api_lockdown`. Prisma never emits it and `ALTER DEFAULT
+  PRIVILEGES` cannot carry it forward, so a new table ships reachable over Supabase's Data API
+  unless the migration says otherwise. `tests/db/data-api-lockdown.test.ts` fails the build if you
+  forget, which is the only reason this is a rule rather than a hope.
 - Every tenant-owned table gets `tenantId`, and the model is added to the right category in
   `src/server/tenant-scope.ts` in the same change. `tenantScopeCoverage.test.ts` fails otherwise.
 - Constraints the schema language cannot express go in a raw-SQL migration — ordering, non-overlap,
@@ -184,6 +189,9 @@ Tests that only assert "no exception thrown" do not count.
   tighten later. Both versions are live for a few seconds during a deploy.
 - Reconcile anything applied out of band (a console, an MCP tool, a `psql` session) back into a
   migration file **immediately**. Drift is how staging and production stop matching.
+- `db:migrate` and `db:reset` refuse any host that is not localhost, and that guard is not to be
+  removed. Both DROP and recreate; against Supabase they also destroy the project's own `auth` and
+  `storage` schemas, and the project does not recover.
 
 ---
 

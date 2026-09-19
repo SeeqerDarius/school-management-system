@@ -31,25 +31,53 @@ One known weakness matters more than the rest and is at the top of the list belo
 | Audit trail | Append-only, written in the same transaction as the change it describes | `src/server/audit.ts` |
 | Database invariants | Ordering, non-overlap (exclusion constraints), one-current partial unique indexes, closure recorded, system role code uniqueness | `prisma/migrations/20260919091000_*` |
 | CI | Secret scan, typecheck, lint, unit tests, build, migrations against real PostgreSQL, drift check, idempotent-seed check, tenant isolation suite | `.github/workflows/ci.yml` |
+| Data API lockdown | Deny-all RLS on every table plus REVOKE from `anon`/`authenticated`, idempotent and portable to plain PostgreSQL | `prisma/migrations/20260919092000_data_api_lockdown` |
 
 ---
 
 ## Known weaknesses
 
-### 1. PostgreSQL row-level security is not in place — **highest priority**
+### 1. Row-level security does not enforce tenancy — **highest priority**
 
-The tenant filter is enforced by a Prisma client extension. That is structural rather than
-remembered, which beats hand-written `where` clauses, but it lives in the application: a
-`$queryRaw`, a future second service, or a console session all reach the tables without it.
+RLS *is* enabled on every table as of migration `20260919092000_data_api_lockdown`, with no
+policies, which closes Supabase's Data API. That is worth having and it is **not** tenant
+isolation.
 
-The previous Java implementation had RLS with a non-superuser role and proved it in tests. That was
-lost in the stack change and is not being presented as anything other than a regression. See
-ADR 0010.
+Prisma connects as `postgres`, which carries `BYPASSRLS`. Every policy is skipped for the
+application's own connection, so tenant isolation still rests entirely on the client extension in
+`src/server/tenant-scope.ts` — which lives in the application, and which a `$queryRaw` bypasses.
+The previous Java implementation had real RLS with a non-superuser role and proved it in tests.
+That was lost in the stack change and is not being presented as anything else. See ADR 0010.
 
-*What it takes:* RLS policies on every tenant-owned table keyed on a session variable, a
-non-superuser application role, and `SET LOCAL app.tenant_id` issued per transaction by the scoped
-client. The isolation suite then re-runs as that role, because a superuser bypasses RLS
-unconditionally and would make every assertion pass whether a policy existed or not.
+**The ordering is load-bearing.** Writing per-tenant policies and switching the connection role are
+one change, not two, and the policies must land first. A non-bypassing role pointed at today's
+policy-less tables makes every query in the product return nothing.
+
+*What it takes, in order:*
+
+1. Per-tenant policies on `campus`, `academic_year`, `term`, `membership`,
+   `reference_sequence`, `branding`; nullable-tenant handling for `audit_log` and
+   `security_event`; and read-shared-but-not-writable handling for `role`, whose NULL `tenantId`
+   means "every school may use this template".
+2. `SET LOCAL app.tenant_id` issued inside every `$transaction`, with policies reading
+   `current_setting('app.tenant_id')`. The raising form fails closed when the variable is unset,
+   which is what we want. Queries made outside a transaction have no session variable, so a good
+   deal of `data.ts` has to move inside one — that cost is the main reason this is staged.
+3. A dedicated login role without `BYPASSRLS`:
+
+   ```sql
+   create role sankofa_app with login password '...'
+     nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
+   grant usage on schema public to sankofa_app;
+   -- then DATABASE_URL becomes sankofa_app.<project-ref>@...
+   ```
+
+   Supabase's own Prisma guide tells you to create this role `with ... bypassrls`. Following it
+   would reintroduce exactly the hole this step exists to close.
+4. A test that fails when the policies are inert. Enabling RLS and then connecting as a bypassing
+   role is the classic way to ship "RLS" that does nothing, and a catalog check for
+   `relrowsecurity` will not catch it — the assertion has to be that a query *returns nothing*
+   when the tenant variable is unset.
 
 ### 2. No sign-in throttling
 
@@ -79,8 +107,13 @@ the only way to create an account today is the seed or a manual insert. Email is
 
 ### 6. No error tracking, no uptime monitoring, no independent backup
 
-Failures reach Vercel's function logs and nowhere else; nobody is paged. Neon's point-in-time
-history is the only recovery path and there is no export independent of Neon.
+Failures reach Vercel's function logs and nowhere else; nobody is paged.
+
+Backups are worse than they were. Neon gave point-in-time history on the free tier; on Supabase,
+point-in-time recovery is a paid add-on and the free plan has no scheduled backups at all. Until
+that is resolved there is **no recovery path from a destructive migration** beyond whatever the
+project's plan provides — which is why `db:reset` and `db:migrate` now refuse any non-local host
+(`scripts/guard-local-db.mjs`), and why `docs/DEPLOYMENT.md` no longer promises one.
 
 ### 7. CodeQL results are not enforced
 
@@ -139,6 +172,7 @@ exists.
 | `src/server/tenantScopeCoverage.test.ts` | `npm test` | Every model with a `tenantId` is scoped |
 | `tests/db/tenant-isolation.test.ts` | `npm run test:db` | Cross-tenant read, update, delete and write-by-claim all fail, against real PostgreSQL |
 | `tests/db/calendar-constraints.test.ts` | `npm run test:db` | The database, not the application, refuses overlapping and backwards periods |
+| `tests/db/data-api-lockdown.test.ts` | `npm run test:db` | No table lacks RLS; the Data API roles hold nothing; btree_gist is out of `public` |
 
 **Not tested yet:** the sign-in path end to end, the calendar actions against a database, session
 revocation, permission resolution with DENY grants. Those need either a database fixture with

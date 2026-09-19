@@ -21,9 +21,10 @@ generator client {
 
 datasource db {
   provider  = "postgresql"
-  // Pooled connection for the application (Neon's pgBouncer endpoint).
+  // Pooled connection for the application (Supabase's Supavisor, transaction mode).
   url       = env("DATABASE_URL")
-  // Direct connection for migrations, which cannot run through a transaction pooler.
+  // Session-mode connection for migrations, which cannot run through a transaction pooler.
+  // Not the db.<ref>.supabase.co host: that is IPv6-only and unreachable from CI.
   directUrl = env("DIRECT_URL")
 }
 

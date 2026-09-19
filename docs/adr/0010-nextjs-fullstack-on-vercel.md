@@ -9,6 +9,12 @@
 Accepted — 2026-09-19. Supersedes [ADR 0002](0002-java-spring-boot-core-api.md) (Java and Spring
 Boot for core-api) and [ADR 0008](0008-monorepo-tooling.md) (npm workspaces and Maven).
 
+**Partly superseded by [ADR 0011](0011-supabase-as-the-postgresql-host.md) — 2026-09-19.** The
+choice of Neon as the PostgreSQL host, including the alternative-considered paragraph below that
+rejects Supabase, no longer describes the system: the database is hosted on Supabase. Everything
+else here stands — one Next.js application on Vercel, Prisma, NextAuth, a single package at the
+repository root — and so does the account of what the move from Java and Firebase cost.
+
 [ADR 0001](0001-postgresql-as-system-of-record.md) still stands: PostgreSQL remains the system of
 record. Only the thing in front of it has changed.
 
@@ -106,7 +112,7 @@ client extension mechanism, which is what makes tenant scoping structural rather
 reproducing that in Drizzle means wrapping every query builder by hand, which is the failure mode
 being designed out.
 
-**Supabase rather than Neon.** Supabase would bring RLS back with its own auth integration, which is
+**Supabase rather than Neon.** *(Reversed the next day — see [ADR 0011](0011-supabase-as-the-postgresql-host.md). The paragraph is left exactly as written, because the cost it names was real and was simply accepted.)* Supabase would bring RLS back with its own auth integration, which is
 genuinely attractive. Rejected for now because it reintroduces a second platform with its own
 credentials and its own dashboard, and because Neon is already the proven path for this deployment.
 Revisit if RLS is not delivered by application-level means to a satisfactory standard.

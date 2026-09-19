@@ -10,7 +10,21 @@
 
 -- Required for an exclusion constraint that mixes equality (a uuid) with overlap (a range).
 -- A plain btree index cannot answer "overlaps"; a plain gist index cannot answer "equals".
-CREATE EXTENSION IF NOT EXISTS btree_gist;
+--
+-- The schema is named rather than left to search_path. Unqualified, PostgreSQL installs an
+-- extension into the first valid entry of the effective search_path, which is "public" both on
+-- Supabase (the postgres role's search_path is '"$user", public, extensions' and no "postgres"
+-- schema exists) and on a bare container. Anything in "public" on Supabase is published through
+-- PostgREST and pg_graphql: a hundred gist support functions would become a hundred callable
+-- endpoints on a database of children's records.
+--
+-- "extensions" already exists on Supabase, so CREATE SCHEMA is a no-op there; on CI and on a
+-- laptop it creates it. That is what lets this be one file for all three. Naming the schema
+-- cannot break the constraints below: the default gist operator class for uuid is found by a
+-- catalog scan of pg_opclass with no search_path filtering, and the constraint then stores
+-- operator OIDs rather than names, so nothing is looked up by name at query time.
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE EXTENSION IF NOT EXISTS btree_gist WITH SCHEMA extensions;
 
 -- -------------------------------------------------------------------------------------
 -- Ordering

@@ -135,8 +135,9 @@ jobs:
 
     env:
       # No pooler in CI, so both point at the same place. In production DATABASE_URL is
-      # Neon's pooled endpoint and DIRECT_URL is the direct one, because migrations cannot
-      # run through a transaction pooler.
+      # Supabase's Supavisor in transaction mode (:6543, with pgbouncer=true) and DIRECT_URL
+      # is Supavisor in session mode (:5432), because migrations cannot run through a
+      # transaction pooler.
       DATABASE_URL: postgresql://sankofa:sankofa@localhost:5432/sankofa_ci
       DIRECT_URL: postgresql://sankofa:sankofa@localhost:5432/sankofa_ci
       NEXTAUTH_SECRET: ci-placeholder-value-never-used-for-anything-real
