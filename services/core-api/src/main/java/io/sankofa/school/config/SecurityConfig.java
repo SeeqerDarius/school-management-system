@@ -7,6 +7,7 @@ import io.sankofa.school.platform.context.CorrelationId;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.MediaType;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -39,7 +40,45 @@ public class SecurityConfig {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * A separate chain for the API documentation UI.
+     *
+     * <p>Swagger UI is an HTML application, and the main chain sends {@code default-src 'none'} —
+     * which is exactly right for an API that returns only JSON, and which makes any HTML
+     * application impossible. The result was a blank page: the browser refused every stylesheet
+     * and script the page asked for. Loosening the API's CSP to fix that would have been the
+     * wrong trade entirely, so the docs get their own chain instead.
+     *
+     * <p>This policy is still narrow — everything must come from this origin — but it does permit
+     * {@code 'unsafe-inline'}, which Swagger UI's bootstrap script requires. That is a real
+     * relaxation, and it is confined to a UI that is disabled by default and should stay disabled
+     * in production ({@code SWAGGER_UI_ENABLED}).
+     */
     @Bean
+    @Order(1)
+    public SecurityFilterChain docsFilterChain(HttpSecurity http) throws Exception {
+        http
+            .securityMatcher("/swagger-ui/**", "/swagger-ui.html", "/v3/api-docs/**")
+            .csrf(csrf -> csrf.disable())
+            .authorizeHttpRequests(auth -> auth.anyRequest().permitAll())
+            .headers(headers -> headers
+                    .frameOptions(frame -> frame.deny())
+                    .contentTypeOptions(Customizer.withDefaults())
+                    .contentSecurityPolicy(csp -> csp.policyDirectives(
+                            "default-src 'self'; "
+                                    + "script-src 'self' 'unsafe-inline'; "
+                                    + "style-src 'self' 'unsafe-inline'; "
+                                    + "img-src 'self' data:; "
+                                    + "font-src 'self'; "
+                                    + "connect-src 'self'; "
+                                    + "frame-ancestors 'none'; "
+                                    + "base-uri 'none'")));
+
+        return http.build();
+    }
+
+    @Bean
+    @Order(2)
     public SecurityFilterChain filterChain(HttpSecurity http,
                                            SessionAuthenticationFilter sessionFilter)
             throws Exception {
@@ -57,8 +96,6 @@ public class SecurityConfig {
                     // means: an application reference, or a provider signature.
                     .requestMatchers("/api/v1/public/**").permitAll()
                     .requestMatchers("/api/v1/webhooks/**").permitAll()
-                    .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html")
-                        .permitAll()
                     .anyRequest().authenticated())
             .addFilterBefore(sessionFilter, UsernamePasswordAuthenticationFilter.class)
             .exceptionHandling(ex -> ex

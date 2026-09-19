@@ -57,7 +57,21 @@ pass whether or not a policy existed.
 | PostgreSQL | 16+ | Not needed for tests — they start their own |
 | Docker | — | **Not required.** Integration tests use an embedded PostgreSQL |
 
-### Backend
+### Run the whole thing locally
+
+```bash
+scripts/dev-stack.sh
+```
+
+Starts a throwaway PostgreSQL, applies every migration, seeds a demo school, and runs the API
+on http://localhost:8080 with Swagger UI at `/swagger-ui/index.html`. Needs a JDK and nothing
+else -- no PostgreSQL install, no superuser password, no Docker.
+
+It does not fake authentication: with no identity provider configured every sign-in is refused,
+which is the truthful behaviour and the same one a misconfigured deployment shows. Point
+`FIREBASE_AUTH_EMULATOR_HOST` at the Firebase Auth emulator to sign in.
+
+### Backend tests
 
 ```bash
 cd services/core-api

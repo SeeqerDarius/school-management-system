@@ -19,6 +19,8 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.servlet.NoHandlerFoundException;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.sql.SQLException;
 import java.util.LinkedHashMap;
@@ -91,6 +93,21 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ApiError> handleAuthentication(AuthenticationException e) {
         return respond(ErrorCode.UNAUTHENTICATED, "Authentication is required", Map.of());
+    }
+
+    /**
+     * A URL that does not exist.
+     *
+     * <p>Without this, a mistyped path fell through to the catch-all and returned 500 with an
+     * ERROR log line — which is wrong twice over: it tells the caller the server broke when the
+     * caller simply asked for something that is not there, and it fills the error log with
+     * noise that would bury a real failure. Every scanner on the internet probes for
+     * {@code /wp-login.php}; none of those should look like an incident.
+     */
+    @ExceptionHandler({NoResourceFoundException.class, NoHandlerFoundException.class})
+    public ResponseEntity<ApiError> handleNoResource(Exception e) {
+        log.debug("[{}] No handler for request", CorrelationId.current());
+        return respond(ErrorCode.NOT_FOUND, "Not found", Map.of());
     }
 
     @ExceptionHandler(AccessDeniedException.class)
