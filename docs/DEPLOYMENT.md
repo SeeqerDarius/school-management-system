@@ -44,9 +44,13 @@ people click things to see what happens.
 ### 1. The database
 
 Create a Supabase project. **Choose the region before you create it** — it is fixed for the life of
-the project and the pooler hostname embeds it. Pair it with the Vercel region in `vercel.json`:
-`lhr1` (London) means `eu-west-2`. A function in London talking to a database in Virginia pays the
-Atlantic on every query, several times per page.
+the project, and the pooler hostname embeds it.
+
+The database region is the immutable one, so it wins: set `regions` in `vercel.json` to the Vercel
+region in the *same* AWS region as the project, rather than moving the database. Today that is
+`eu-west-1` (Ireland) and `dub1`. A function talking to a database one region away pays that hop
+on every query, and a single page render makes several in sequence — session, memberships,
+permissions, then the page's own reads.
 
 From **Connect → ORMs → Prisma**, copy both strings:
 
@@ -94,10 +98,18 @@ Supabase — no dashboard click, no superuser.
 ### 2. The project
 
 Import the repository into Vercel. The settings in `vercel.json` are already correct — framework
-`nextjs`, `npm ci` to install, `npm run build` to build, region `lhr1`.
+`nextjs`, `npm ci` to install, `npm run build` to build, region `dub1`.
 
-`lhr1` (London) is the default because it is the closest Vercel region to Ghana with full feature
-support. The Supabase region must match — see §1.
+`dub1` is Dublin, `eu-west-1`, which is where the Supabase project lives. Co-location beats
+proximity to the user here: the Ghana-to-edge hop is paid once per request, while the
+function-to-database hop is paid several times in sequence within it. `lhr1` (London) is marginally
+better connected to West Africa, and that is the smaller number.
+
+Static assets do not depend on this setting at all — they are served from Vercel's global edge
+network regardless. `regions` only places the serverless functions.
+
+**If the database ever moves, move this with it.** The two being in different AWS regions is a
+silent tax on every page, not an error anyone will see.
 
 ### 3. Environment variables
 
