@@ -1,6 +1,6 @@
 # Implementation Status
 
-**Last updated:** 2026-09-18
+**Last updated:** 2026-09-19
 
 This file is the honest record of what exists. It is not a plan and not a wish list.
 
@@ -66,10 +66,12 @@ remembering to extend the test.
 
 ### What does not exist
 
-**Every business module.** Students, admissions, attendance, timetabling, assessment, grading,
-fees, accounting, HR, payroll, library, inventory, procurement, assets, communications, E2EE
-messaging, and the entire web application. There is also **no way to authenticate yet** — there is
-no session endpoint, so the system cannot currently be used by a human.
+**Almost every business module.** Students, admissions, attendance, timetabling, assessment,
+grading, fees, accounting, HR, payroll, library, inventory, procurement, assets, communications
+and E2EE messaging. The web application has exactly one screen.
+
+A human still cannot use this system, but the reason has changed: sign-in is built and tested,
+and what is missing is a **Firebase project** for it to verify tokens against.
 
 ---
 
@@ -77,16 +79,16 @@ no session endpoint, so the system cannot currently be used by a human.
 
 | Item | Status | Evidence |
 |---|---|---|
-| Monorepo structure | `FUNCTIONAL` | Directory tree; npm workspaces not yet initialised |
+| Monorepo structure | `FUNCTIONAL` | npm workspaces: `apps/web`, `services/core-api`, `packages/*` |
 | Engineering conventions | `DOCUMENTED` | [AGENTS.md](AGENTS.md) — 12 prohibitions, 16-point DoD |
 | Architecture definition | `DOCUMENTED` | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — invariants I-1..I-8 |
 | Module boundary enforcement | `TESTED` | `ModuleBoundaryTest`, 11 rules |
 | Java build | `FUNCTIONAL` | Maven Wrapper 3.3.4 / Maven 3.9.16 |
-| Flyway migrations | `TESTED` | 4 migrations apply from empty on every test run |
+| Flyway migrations | `TESTED` | 10 migrations apply from empty on every test run |
 | Embedded test database | `TESTED` | zonky PostgreSQL, non-superuser app role asserted |
 | Database bootstrap | `FUNCTIONAL` | `database/bootstrap/00_roles.sql`, re-asserts role attributes |
 | Environment template | `DOCUMENTED` | `.env.example`, dummy values only |
-| CI pipeline | `FUNCTIONAL` | `.github/workflows/ci.yml`, `codeql.yml` — **not yet observed green on GitHub** |
+| CI pipeline | `TESTED` | Observed green on GitHub: secret scan, backend, web, generated-file drift |
 | Firebase project | `NOT_STARTED` | No project provisioned, no rules written |
 | Container image | `FUNCTIONAL` | Dockerfile written; layered extraction and launcher layout verified locally. **Image never built — no Docker available** |
 | Deployment documentation | `DOCUMENTED` | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), including a production smoke test |
@@ -112,8 +114,8 @@ no session endpoint, so the system cannot currently be used by a human.
 | MFA enforcement | `IN_PROGRESS` | `mfa_required` is checked at sign-in and returns `MFA_REQUIRED`; **no enrolment flow, no test** |
 | Support access workflow | `IN_PROGRESS` | Schema only; no service, no UI, no audit wiring |
 | Outbox dispatch | `IN_PROGRESS` | Schema only; no poller |
+| Sign-in rate limiting | `TESTED` | `RateLimitIT` + `InMemoryRateLimiterTest`; **per-instance only** |
 | Subscription / entitlements | `NOT_STARTED` | — |
-| School / campus / branding | `NOT_STARTED` | — |
 
 ## Phase 2 — School structure
 
