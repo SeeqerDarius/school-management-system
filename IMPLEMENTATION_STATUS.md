@@ -34,7 +34,7 @@ the system depends on being correct.
 | | |
 |---|---|
 | Migrations | 10, applying cleanly from an empty database |
-| Tests | **124 passing** — 71 unit, 53 integration |
+| Tests | **136 passing** — 78 unit, 58 integration |
 | Backend build | `./mvnw clean verify` green on JDK 25 LTS / Spring Boot 3.5.16 |
 | Web build | `typecheck`, `lint` and `next build` all clean on Next 16.3.5 / React 19 |
 | RBAC | 142 permissions, 26 system roles, 360 grants, cross-validated code ↔ database |
@@ -156,9 +156,17 @@ Recorded here rather than left implicit, because an unrecorded gap becomes a sur
    not exist. The API's own happy path is covered by the integration suite, so what is unproven
    is specifically the join between the two tiers. Provisioning a Firebase project is the single
    highest-value next step.
-2. **No rate limiting on sign-in.** §84 requires it and `bucket4j` is on the classpath, but
-   nothing uses it yet. Credential stuffing against parent accounts is currently unthrottled —
-   it is *recorded* (`SIGN_IN_REFUSED_NO_ACCOUNT`), but not slowed.
+2. **Rate limiting is per-instance and in-memory.** Sign-in is now throttled (§84), but each
+   process keeps its own buckets: behind a load balancer with three instances the effective
+   limit is three times the policy. It is a real weakening, not a rounding error, and it must be
+   replaced with a shared store (Redis, or bucket4j over PostgreSQL) before scaling past one
+   instance. It also assumes the API is **unreachable except through the trusted proxy** — expose
+   the container directly and a forged `X-Forwarded-For` earns a fresh bucket per fabricated
+   address, bypassing the limiter entirely while the dashboard still says one exists.
+
+   Only sign-in, membership switching and public endpoints are covered. §84 also calls for
+   limits on exports, messaging, SMS dispatch, payment initiation and file upload; those are
+   added as each module lands.
 3. **The outbox has no poller.** `platform.outbox` is written by nothing and drained by nothing,
    so `ARCHITECTURE.md` §6's description of event dispatch is currently aspirational.
 4. **CodeQL results are not published, and its gate is currently soft.** The analysis runs and
@@ -213,11 +221,21 @@ production looking fine:
 
 ## Next actions, in priority order
 
-1. `POST /api/v1/sessions` with Firebase ID token verification, plus its tests — without this
-   nothing else can be exercised by a human.
-2. School / campus / academic-year / term schema and API.
-3. One module end to end as the reference pattern every later module copies: schema → repository
-   → application service → controller → tests → UI.
-4. `apps/web` scaffold with the session cookie BFF.
-5. Outbox poller and the notification service skeleton.
-6. The missing ADRs and documents listed above, and a `README.md`.
+**Blocked on you, and blocking the most:**
+
+1. **Provision a Firebase project.** Nobody can sign in without one, so the web tier cannot be
+   driven end to end in a browser and the production smoke test cannot be run. Everything below
+   is verifiable without it; the seam between the two tiers is not.
+
+**Unblocked:**
+
+2. Finish campus and branding — schema exists, service/API/UI do not. Completes Phase 2 using
+   the calendar module's pattern.
+3. Outbox poller and the notification service skeleton. Until this exists,
+   `ARCHITECTURE.md` §6's description of event dispatch is aspirational, and nothing writes to
+   `platform.outbox` either.
+4. The seven missing ADRs and six missing documents. `ARCHITECTURE.md` §8 links to all of them
+   and every link is currently dead.
+5. Students and guardians — the first module with genuinely sensitive personal data, and the
+   first real test of the role-by-field visibility matrix in `DATA_PRIVACY.md`.
+6. Replace the in-memory rate limiter with a shared store, before any multi-instance deployment.

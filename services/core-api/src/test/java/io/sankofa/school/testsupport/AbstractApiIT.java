@@ -1,6 +1,7 @@
 package io.sankofa.school.testsupport;
 
 import io.sankofa.school.identity.auth.IdentityTokenVerifier;
+import io.sankofa.school.platform.ratelimit.InMemoryRateLimiter;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -37,6 +38,9 @@ public abstract class AbstractApiIT {
     @Autowired
     protected StubIdentityTokenVerifier identityTokens;
 
+    @Autowired
+    protected InMemoryRateLimiter rateLimiter;
+
     @DynamicPropertySource
     static void databaseProperties(DynamicPropertyRegistry registry) {
         TestDatabase.start();
@@ -50,8 +54,13 @@ public abstract class AbstractApiIT {
     }
 
     @BeforeEach
-    void resetIdentityTokens() {
+    void resetPerTestState() {
         identityTokens.reset();
+        // These suites sign in dozens of times from one address, which no human does. Without
+        // clearing, they would trip the sign-in limit and fail for a reason unrelated to what
+        // they assert — and the tempting fix would be to loosen the policy. The limiter stays
+        // real; RateLimitIT exercises it properly.
+        rateLimiter.clear();
     }
 
     @TestConfiguration

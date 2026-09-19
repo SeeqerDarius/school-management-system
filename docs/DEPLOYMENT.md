@@ -123,6 +123,8 @@ Runtime requirements the host must satisfy:
 - Readiness probe on `/actuator/health/readiness`, with a start period of at least 45 seconds —
   Flyway runs at boot and a cold JVM is not fast
 - Outbound network to PostgreSQL and to Google's token-signing endpoints
+- **Ingress only from the load balancer.** The rate limiter trusts `X-Forwarded-For` because
+  Spring is configured to; that is safe only while nothing can reach the container directly
 - Memory: 512 MiB is the floor, 1 GiB is comfortable. `MaxRAMPercentage=75` adapts the heap to
   whatever the platform actually granted
 
@@ -246,7 +248,8 @@ no guide.
 | Gap | Consequence |
 |---|---|
 | **No Firebase project** | Nobody can sign in. The application is unusable |
-| **No rate limiting on sign-in** | Credential stuffing against parent accounts is recorded but not slowed (§84) |
+| **Rate limiting is per-instance and in-memory** | Correct for one instance. Behind a load balancer with three, the effective limit is three times the policy. Needs a shared store (Redis, or bucket4j over PostgreSQL) before scaling out |
+| **The API must be unreachable except through the proxy** | The rate limiter keys on the client address, which Spring derives from `X-Forwarded-For`. Expose the container port directly and an attacker forges that header, gets a fresh bucket per fabricated address, and bypasses the limiter entirely |
 | **The container image has never been built** | The Dockerfile is verified only as far as the layered-jar extraction and launcher layout, which were tested locally without Docker |
 | **Flyway runs at application start** | Unsafe above one instance |
 | **No backup or restore procedure has been exercised** | A backup never restored is not a backup (`BACKUP_RESTORE.md` is not yet written) |
