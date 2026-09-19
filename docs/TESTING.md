@@ -1,5 +1,20 @@
 # Testing
 
+> ### ⚠ Partly out of date — read this first
+>
+> This document was written for the previous architecture: a Java/Spring Boot API, Firebase
+> Authentication, Firestore and Flyway. That stack was retired on 2026-09-19; see
+> [ADR 0010](adr/0010-nextjs-fullstack-on-vercel.md) for what replaced it and what was lost.
+>
+> **The testing philosophy and the required coverage per change still stand, and are restated in AGENTS.md §7. Every command, tool and file path is wrong — the suites now live in vitest.config.ts and vitest.db.config.ts.**
+>
+> It has not been rewritten yet, and rewriting it is tracked in
+> [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md). Nothing here has been silently
+> corrected, because a half-updated security document is more dangerous than an obviously stale
+> one — you cannot tell which half you are reading.
+
+---
+
 > **What this is for:** the testing strategy for the Sankofa School Platform — what each layer of
 > test is responsible for, how to write the seven mandatory test categories, and what we do when a
 > test goes flaky. **Who reads it:** anyone writing or reviewing a test in this repository.

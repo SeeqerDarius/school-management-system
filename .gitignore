@@ -1,68 +1,43 @@
-# ---- Secrets (NEVER commit) ----
-.env
-.env.*
-!.env.example
+# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
+
+# dependencies
+/node_modules
+/.pnp
+.pnp.*
+.yarn/*
+!.yarn/patches
+!.yarn/plugins
+!.yarn/releases
+!.yarn/versions
+
+# testing
+/coverage
+
+# next.js
+/.next/
+/out/
+
+# production
+/build
+
+# misc
+.DS_Store
 *.pem
-*.key
-*.p12
-*.jks
-**/serviceAccount*.json
-**/firebase-adminsdk*.json
-**/*-service-account.json
-secrets/
-.secrets/
 
-# ---- Node ----
-node_modules/
-.next/
-out/
-build/
-dist/
-.turbo/
-*.tsbuildinfo
-.npm
-.eslintcache
-coverage/
-playwright-report/
-test-results/
-blob-report/
-.playwright/
+# debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
 
-# ---- Java ----
-target/
-!.mvn/wrapper/maven-wrapper.jar
-.gradle/
-*.class
-hs_err_pid*
-replay_pid*
+# env files. .env.example is the exception: it is the documented list of what must be set,
+# filled with obvious dummy values, and it is meant to be committed.
+.env*
+!.env.example
 
-# ---- Firebase ----
-.firebase/
-firebase-debug.log
-firestore-debug.log
-ui-debug.log
-database-debug.log
-pubsub-debug.log
-firebase-export-*/
-
-# ---- Vercel ----
+# vercel
 .vercel
 
-# ---- IDE / OS ----
-.idea/
-*.iml
-.vscode/*
-!.vscode/extensions.json
-!.vscode/settings.sample.json
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# ---- Local scratch ----
-tmp/
-.tmp/
-*.local
-
-# ---- Next.js generated agent files (root AGENTS.md is normative) ----
-apps/web/AGENTS.md
-apps/web/CLAUDE.md
+# typescript
+*.tsbuildinfo
+next-env.d.ts

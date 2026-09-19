@@ -1,5 +1,20 @@
 # Data Privacy
 
+> ### ⚠ Partly out of date — read this first
+>
+> This document was written for the previous architecture: a Java/Spring Boot API, Firebase
+> Authentication, Firestore and Flyway. That stack was retired on 2026-09-19; see
+> [ADR 0010](adr/0010-nextjs-fullstack-on-vercel.md) for what replaced it and what was lost.
+>
+> **The legal obligations, the retention schedules and the data classification are unaffected by a change of framework and still apply in full. The storage and access mechanisms named here have changed.**
+>
+> It has not been rewritten yet, and rewriting it is tracked in
+> [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md). Nothing here has been silently
+> corrected, because a half-updated security document is more dangerous than an obviously stale
+> one — you cannot tell which half you are reading.
+
+---
+
 > **What this is for:** the rules that decide what personal data the Sankofa School Platform may
 > hold, who may see which field, how long it survives and how it leaves. **Who reads it:** an
 > engineer about to add a column or a screen, and a school's data protection point of contact who

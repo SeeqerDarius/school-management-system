@@ -1,5 +1,20 @@
 # Threat Model
 
+> ### ⚠ Partly out of date — read this first
+>
+> This document was written for the previous architecture: a Java/Spring Boot API, Firebase
+> Authentication, Firestore and Flyway. That stack was retired on 2026-09-19; see
+> [ADR 0010](adr/0010-nextjs-fullstack-on-vercel.md) for what replaced it and what was lost.
+>
+> **The threats, the assets and the attacker model are unchanged and still apply. The named mitigations are not: wherever this says "Firebase", "RLS policy", "Spring Security filter" or "Flyway", check the current control in docs/ARCHITECTURE.md before relying on it. Row-level security in particular is described here as in place; it is not.**
+>
+> It has not been rewritten yet, and rewriting it is tracked in
+> [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md). Nothing here has been silently
+> corrected, because a half-updated security document is more dangerous than an obviously stale
+> one — you cannot tell which half you are reading.
+
+---
+
 > **What this is for:** the STRIDE threat model for the Sankofa School Platform — the enumerated
 > ways this system can be attacked, what we do about each, and what we have decided not to do.
 > **Who reads it:** engineers before designing a module, reviewers before approving a pull request

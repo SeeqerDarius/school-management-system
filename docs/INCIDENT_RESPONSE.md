@@ -1,5 +1,20 @@
 # Incident Response
 
+> ### ⚠ Partly out of date — read this first
+>
+> This document was written for the previous architecture: a Java/Spring Boot API, Firebase
+> Authentication, Firestore and Flyway. That stack was retired on 2026-09-19; see
+> [ADR 0010](adr/0010-nextjs-fullstack-on-vercel.md) for what replaced it and what was lost.
+>
+> **The process, the severity ladder and the statutory notification clock are unchanged and still apply. The rollback and access procedures have changed — docs/DEPLOYMENT.md has the current ones.**
+>
+> It has not been rewritten yet, and rewriting it is tracked in
+> [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md). Nothing here has been silently
+> corrected, because a half-updated security document is more dangerous than an obviously stale
+> one — you cannot tell which half you are reading.
+
+---
+
 **What this is for:** the procedure to follow when something is wrong in production on the
 Sankofa School Platform, from detection to the written review. **Who reads it:** whoever is on
 call, and whoever they wake up.
