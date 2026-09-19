@@ -122,19 +122,17 @@ export function forTenant(tenantId: string) {
             READ_OPERATIONS.has(operation);
 
           if (isRead && TENANT_SHARED.has(model)) {
-            // This tenant's rows plus the shared ones. Composed under AND rather than spread
-            // over the caller's `where`, so a caller's own OR is not silently discarded and
-            // the unique field a findUnique needs stays at the top level.
-            return query({ ...a, where: sharedWhere(a.where, tenantId) });
+            // This tenant's rows plus the shared ones.
+            return query({
+              ...a,
+              where: withClause(a.where, { OR: [{ tenantId }, { tenantId: null }] }),
+            });
           }
 
           if (isRead || WRITE_WITH_WHERE.has(operation)) {
             // Writes to a shared model fall through to here deliberately: narrowed to this
             // tenant's own rows, so the shared templates cannot be edited from inside a school.
-            return query({
-              ...a,
-              where: { ...((a.where as object) ?? {}), tenantId },
-            });
+            return query({ ...a, where: withClause(a.where, { tenantId }) });
           }
 
           if (operation === 'create') {
@@ -155,7 +153,7 @@ export function forTenant(tenantId: string) {
           if (operation === 'upsert') {
             return query({
               ...a,
-              where: { ...((a.where as object) ?? {}), tenantId },
+              where: withClause(a.where, { tenantId }),
               create: { ...((a.create as object) ?? {}), tenantId },
             });
           }
@@ -172,12 +170,22 @@ export function forTenant(tenantId: string) {
 }
 
 /**
- * Adds "…and belongs to this tenant or to nobody" to a where clause, without disturbing what
- * the caller already wrote.
+ * Adds a tenant condition to a where clause without disturbing what the caller wrote.
+ *
+ * <p>Composed under `AND` rather than spread over the caller's `where`, and the difference is
+ * not cosmetic. Spreading `{ ...where, tenantId }` lets the injected value overwrite an explicit
+ * one, so `findMany({ where: { tenantId: someOtherSchool } })` quietly returns *this* school's
+ * rows — the right rows, for a question nobody asked. Under `AND` the two conditions contradict
+ * and the query returns nothing, which is the honest answer.
+ *
+ * <p>It also keeps the caller's own fields at the top level, which `findUnique` requires, and
+ * preserves an `AND` the caller had already written rather than replacing it.
+ *
+ * <p>Note the deliberate asymmetry with `create`, where the tenant id IS overwritten: a row has
+ * to be written to exactly one tenant, and the only safe choice is the session's.
  */
-function sharedWhere(where: unknown, tenantId: string): Record<string, unknown> {
+function withClause(where: unknown, clause: object): Record<string, unknown> {
   const existing = (where as Record<string, unknown>) ?? {};
-  const clause = { OR: [{ tenantId }, { tenantId: null }] };
   const previous = existing.AND;
 
   const AND =

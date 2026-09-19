@@ -109,13 +109,24 @@ describe('reads', () => {
     expect(everyone).toBeGreaterThan(belongingToA);
   });
 
-  it('ignores a where clause that tries to name another school', async () => {
-    // The injected filter is applied last, so an explicit tenantId in the caller's own where
-    // cannot widen it.
+  it('returns nothing for a where clause that names another school', async () => {
+    // Composed under AND, so naming another tenant contradicts the injected filter and the
+    // query returns nothing. It must NOT quietly return this tenant's rows instead: that is
+    // the right rows for a question nobody asked, and it hides the caller's mistake.
     const rows = await forTenant(tenantA).academicYear.findMany({
       where: { tenantId: tenantB },
     });
     expect(rows).toEqual([]);
+  });
+
+  it('still applies the tenant filter alongside a caller AND clause', async () => {
+    // The caller's own AND must survive composition rather than be replaced by ours.
+    const rows = await forTenant(tenantA).academicYear.findMany({
+      where: { AND: [{ code: '2026/2027' }] },
+    });
+
+    expect(rows.map((row) => row.id)).toContain(yearA);
+    expect(rows.every((row) => row.tenantId === tenantA)).toBe(true);
   });
 });
 
