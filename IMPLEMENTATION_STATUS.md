@@ -34,11 +34,11 @@ the system depends on being correct.
 | | |
 |---|---|
 | Migrations | 10, applying cleanly from an empty database |
-| Tests | **136 passing** — 78 unit, 58 integration |
+| Tests | **199 passing** — 126 unit, 73 integration |
 | Backend build | `./mvnw clean verify` green on JDK 25 LTS / Spring Boot 3.5.16 |
 | Web build | `typecheck`, `lint` and `next build` all clean on Next 16.3.5 / React 19 |
 | RBAC | 142 permissions, 26 system roles, 360 grants, cross-validated code ↔ database |
-| Architecture rules | 11 ArchUnit rules enforcing module boundaries |
+| Architecture rules | 12 ArchUnit rules enforcing module boundaries and money typing |
 | CI | Secret scan, backend build+test, web build, generated-file drift, append-only migrations, dependency review, CodeQL |
 
 One business module exists end to end — the **academic calendar** — and it is deliberately the
@@ -126,8 +126,10 @@ and what is missing is a **Firebase project** for it to verify tokens against.
 | Calendar state machine | `TESTED` | `CalendarStatusTest` — every legal and illegal transition, exhaustively |
 | Audit log | `FUNCTIONAL` | `audit.audit_log`, append-only by trigger *and* by revoked privilege |
 | Academic calendar UI | `FUNCTIONAL` | Renders at desktop and phone width, light and dark; **happy path unverified in-browser** |
-| Campus | `IN_PROGRESS` | Schema and domain type exist; **no service, no API, no UI** |
-| Branding | `IN_PROGRESS` | Schema only |
+| Campus and branding UI | `NOT_STARTED` | API exists; no screens yet |
+| Campus | `TESTED` | `SchoolSettingsApiIT` — first-campus-is-main, main cannot be closed, isolation, permissions |
+| Branding | `TESTED` | Colour constrained to accessible use (§94); logo by storage path, never URL |
+| Brand colour accessibility | `TESTED` | `BrandColorTest`, 47 tests incl. a full greyscale sweep of the contrast curve |
 
 ## Phase 3 onward — business modules
 
@@ -231,8 +233,7 @@ production looking fine:
 
 **Unblocked:**
 
-2. Finish campus and branding — schema exists, service/API/UI do not. Completes Phase 2 using
-   the calendar module's pattern.
+2. Screens for campus and branding — the APIs exist and are tested; there are no UI screens.
 3. Outbox poller and the notification service skeleton. Until this exists,
    `ARCHITECTURE.md` §6's description of event dispatch is aspirational, and nothing writes to
    `platform.outbox` either.

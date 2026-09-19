@@ -166,20 +166,57 @@ class ModuleBoundaryTest {
                             + "the signature, not hidden in reflection");
 
     /**
-     * Invariant I-2. A single {@code double} on a money path is enough to make a ledger
-     * unreconcilable, and it will not announce itself — the totals simply stop matching.
+     * Invariant I-2, scoped to where it actually applies.
+     *
+     * <p>An earlier version of this rule banned floating point outright. That was wrong, and a
+     * WCAG contrast ratio caught it: I-2 says <em>money</em> is {@code BigDecimal}, not that
+     * {@code double} is forbidden. Luminance, percentages and statistical ratios are perfectly
+     * good doubles, and a rule that flags them trains people to add exclusions — which is how a
+     * rule stops meaning anything.
+     *
+     * <p>So it is enforced two ways instead, each catching what the other misses: no floating
+     * point anywhere in a module that handles money, and no floating point on a field whose name
+     * says it holds money, wherever it lives.
      */
     @ArchTest
-    static final ArchRule no_floating_point_fields =
+    static final ArchRule no_floating_point_in_money_modules =
             noFields()
+                    .that().areDeclaredInClassesThat().resideInAnyPackage(
+                            "io.sankofa.school.finance..",
+                            "io.sankofa.school.accounting..",
+                            "io.sankofa.school.payroll..",
+                            "io.sankofa.school.tax..",
+                            "io.sankofa.school.procurement..",
+                            "io.sankofa.school.platform.money..")
                     .should().haveRawType(double.class)
                     .orShould().haveRawType(float.class)
                     .orShould().haveRawType(Double.class)
                     .orShould().haveRawType(Float.class)
                     .allowEmptyShould(true)
-                    .because("Invariant I-2: money is BigDecimal. A float anywhere near an "
-                            + "amount is a defect that surfaces months later as a ledger that "
-                            + "will not balance");
+                    .because("Invariant I-2: money is BigDecimal. A float in a module that "
+                            + "handles money is a defect that surfaces months later as a ledger "
+                            + "that will not balance");
+
+    /**
+     * The same invariant, caught by name rather than by location.
+     *
+     * <p>A {@code double totalAmount} on a reporting DTO is every bit as wrong as one in the
+     * accounting module, and this is what catches it there.
+     */
+    @ArchTest
+    static final ArchRule no_floating_point_money_fields =
+            noFields()
+                    .that().haveNameMatching(
+                            "(?i).*(amount|price|total|balance|fee|salary|wage|cost|payment"
+                                    + "|credit|debit|discount|refund|tax|levy|allowance"
+                                    + "|deduction|gross|net).*")
+                    .should().haveRawType(double.class)
+                    .orShould().haveRawType(float.class)
+                    .orShould().haveRawType(Double.class)
+                    .orShould().haveRawType(Float.class)
+                    .allowEmptyShould(true)
+                    .because("Invariant I-2: a field that holds money is BigDecimal, wherever "
+                            + "it happens to be declared");
 
     /**
      * {@code java.util.Date} is mutable, has no timezone, and silently mixes instants with
