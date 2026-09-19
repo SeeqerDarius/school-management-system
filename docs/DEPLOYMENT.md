@@ -126,10 +126,14 @@ Set these in Vercel for **Production** and **Preview** separately.
 `NEXT_PUBLIC_*` is inlined into the JavaScript bundle and served to every visitor. Nothing secret
 goes behind that prefix, ever. CI fails the build if anything tries.
 
-There is no `NEXT_PUBLIC_SUPABASE_URL` and no `NEXT_PUBLIC_SUPABASE_ANON_KEY`, and there never will
-be. This product does not use supabase-js, PostgREST, Supabase Auth or Supabase Storage — Prisma
-speaks to PostgreSQL and nothing else does. Publishing an anon key would hand the internet a second
-door into the same tables.
+There are no `NEXT_PUBLIC_SUPABASE_*` variables — no project URL, no publishable key — and there
+never will be. This product does not use supabase-js, PostgREST, Supabase Auth or Supabase Storage;
+Prisma speaks to PostgreSQL and nothing else does. Publishing a publishable key would hand the
+internet a second door into the same tables.
+
+(Those names are written with a wildcard on purpose. The secret scan in CI matches the literal
+variable name and cannot tell a warning from an exposure, so spelling one out in full here would
+fail the build. Reword the prose; do not add an exclusion to the scan.)
 
 ### 4. Migrate
 

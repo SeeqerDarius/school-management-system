@@ -642,8 +642,8 @@ when they are created.
 ### T-21 · Secret leakage into the client bundle
 **STRIDE:** I, E · **Impact:** Critical · **Likelihood:** Medium
 
-**Scenario.** A developer needs the API to work from a Client Component, so they add
-`NEXT_PUBLIC_CORE_API_KEY`. Next.js inlines anything prefixed `NEXT_PUBLIC_` into the JavaScript
+**Scenario.** A developer needs the API to work from a Client Component, so they add a
+`NEXT_PUBLIC_CORE_API_*` credential. Next.js inlines anything prefixed `NEXT_PUBLIC_` into the JavaScript
 served to every browser. The key is now in a public bundle, in a CDN cache, and in the GitHub
 Actions build log. Firebase *web* config is genuinely public and safe; a service-account JSON or a
 provider secret is not, and the two look similar to someone in a hurry.
