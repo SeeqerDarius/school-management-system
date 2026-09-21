@@ -174,7 +174,64 @@ error, not data:
 curl -s "https://<project-ref>.supabase.co/rest/v1/app_user?select=id&limit=1" -H "apikey: <publishable key>"
 ```
 
-### 5. The first real account
+### 5. Switch to the restricted database role
+
+**Until this step is taken, the row-level security policies enforce nothing in this deployment.**
+
+`20260920000000_rls_tenant_isolation` creates `sankofa_app`, a role declared `NOBYPASSRLS`, and
+writes the per-tenant policies that bind to it; `20260921130000_app_user_policies` adds the ones
+`app_user` needs, without which signing in as this role finds no readable user row. It creates the role `NOLOGIN` and without a
+password on purpose — a password written into a migration is a password in git, readable by
+everyone with the repository and preserved in its history forever.
+
+So the credential is created here, by hand, once:
+
+```sql
+-- In the Supabase SQL editor, or psql as the project's postgres role.
+ALTER ROLE sankofa_app WITH LOGIN PASSWORD '<generate 32+ random characters>';
+```
+
+Then repoint both connection strings at it — the pooled one the application uses and the direct
+one migrations use. Keep the shape shown in `.env.example` and change only the credentials:
+
+| | `DATABASE_URL` | `DIRECT_URL` |
+| --- | --- | --- |
+| User | `sankofa_app.<project-ref>` | `sankofa_app.<project-ref>` |
+| Password | the value generated above | the same |
+| Port | 6543, Supavisor transaction mode | 5432, session mode |
+| Query string | keep `pgbouncer=true` and the rest | keep as it is |
+
+Everything else — host, database name, `sslmode` — stays exactly as it was. Only the user and
+password change.
+
+(This file states the parts rather than a full URL on purpose: the CI secret scan matches
+anything URL-shaped carrying a password and cannot tell a placeholder from a paste. Rewording is
+the fix; excluding `docs/` from the scan would let a genuinely pasted credential through a
+security gate, which AGENTS.md rule 2 forbids.)
+
+Redeploy so the functions pick up the new values. Nothing else changes: the application code is
+identical under either role, because it binds `app.tenant_id` on every transaction regardless of
+whether anything is reading it.
+
+**Verify it actually took**, because the failure mode here is silent — everything keeps working
+while enforcing nothing:
+
+```sql
+-- Must return f, f. If either is t, the policies are decoration.
+SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user;
+```
+
+Run it as the application's own connection string, not as `postgres`. Asking the wrong role
+answers the wrong question.
+
+> Supabase's own Prisma guide tells you to create this role `WITH ... BYPASSRLS`. Following it
+> reintroduces exactly the hole this step exists to close, and the verification above is how you
+> would find out.
+
+If something goes wrong, the way back is one line — point `DATABASE_URL` at the `postgres` role
+again and redeploy. The policies stay in place and simply stop applying.
+
+### 6. The first real account
 
 There is no self-service registration, so the first administrator has to be created deliberately.
 Do it with a one-off script against production using the same bcrypt work factor as
