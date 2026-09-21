@@ -6,6 +6,13 @@ import bcrypt from 'bcryptjs';
 
 import { withRequestContext } from '@/server/db-context';
 import { effectivePermissions, membershipsForUser } from '@/server/auth/permissions';
+import {
+  accountKey,
+  checkSignInThrottle,
+  clientAddress,
+  SIGN_IN_FAILED,
+  SIGN_IN_THROTTLED,
+} from '@/server/auth/throttle';
 
 /**
  * Authentication.
@@ -44,10 +51,32 @@ export const authOptions: NextAuthOptions = {
         password: { label: 'Password', type: 'password' },
       },
 
-      async authorize(credentials) {
+      async authorize(credentials, req) {
         const email = credentials?.email?.trim().toLowerCase();
         const password = credentials?.password;
         if (!email || !password) return null;
+
+        const ipAddress = clientAddress(req?.headers as Record<string, string | undefined>);
+        const emailHash = accountKey(email);
+
+        // Before bcrypt, on purpose. A limit applied after verification still pays the cost it
+        // exists to avoid — a bcrypt comparison per attempt, for as long as the attacker keeps
+        // going. Refusing here costs one indexed count.
+        const throttle = await withRequestContext({}, (tx) =>
+          checkSignInThrottle(tx, { emailHash, ipAddress }),
+        );
+
+        if (!throttle.allowed) {
+          await recordSecurityEvent(null, SIGN_IN_THROTTLED, 'WARNING', {
+            ipAddress,
+            emailHash,
+            detail: { scope: throttle.scope, retryAfterSeconds: throttle.retryAfterSeconds },
+          });
+          // The same null every other refusal returns. Saying "you are locked out" would
+          // confirm the address is worth attacking, and saying how long would tell a script
+          // exactly when to resume.
+          return null;
+        }
 
         // Bound to the address being authenticated, and nothing else. The row-level security
         // policy on app_user admits exactly that one row to an otherwise anonymous transaction,
@@ -72,12 +101,18 @@ export const authOptions: NextAuthOptions = {
         const passwordMatches = await bcrypt.compare(password, hash);
 
         if (!user || !user.passwordHash || !passwordMatches) {
-          await recordSecurityEvent(user?.id ?? null, 'SIGN_IN_FAILED', 'NOTICE');
+          await recordSecurityEvent(user?.id ?? null, SIGN_IN_FAILED, 'NOTICE', {
+            ipAddress,
+            emailHash,
+          });
           return null;
         }
 
         if (user.status !== 'ACTIVE') {
-          await recordSecurityEvent(user.id, `SIGN_IN_REFUSED_${user.status}`, 'NOTICE');
+          await recordSecurityEvent(user.id, `SIGN_IN_REFUSED_${user.status}`, 'NOTICE', {
+            ipAddress,
+            emailHash,
+          });
           return null;
         }
 
@@ -87,7 +122,7 @@ export const authOptions: NextAuthOptions = {
             data: { lastLoginAt: new Date() },
           }),
         );
-        await recordSecurityEvent(user.id, 'SIGN_IN_SUCCEEDED', 'INFO');
+        await recordSecurityEvent(user.id, 'SIGN_IN_SUCCEEDED', 'INFO', { ipAddress, emailHash });
 
         return { id: user.id, email: user.email, name: user.fullName };
       },
@@ -194,12 +229,28 @@ async function recordSecurityEvent(
   userId: string | null,
   eventType: string,
   severity: 'INFO' | 'NOTICE' | 'WARNING' | 'CRITICAL',
+  context: {
+    ipAddress?: string | null;
+    /** Keyed hash of the address attempted. Never the address itself — see throttle.ts. */
+    emailHash?: string;
+    detail?: Record<string, unknown>;
+  } = {},
 ) {
   try {
     // No tenant, and often no user: a refused sign-in is exactly the case the write policy has
     // to admit, and the read policy with it — Prisma's create() returns the row it wrote.
     await withRequestContext({ userId }, (tx) =>
-      tx.securityEvent.create({ data: { userId, eventType, severity } }),
+      tx.securityEvent.create({
+        data: {
+          userId,
+          eventType,
+          severity,
+          ipAddress: context.ipAddress ?? null,
+          // The throttle counts rows by this, so it is written on every sign-in outcome rather
+          // than only on failures — a success must still be findable in the same trail.
+          detail: { ...(context.detail ?? {}), ...(context.emailHash ? { emailHash: context.emailHash } : {}) },
+        },
+      }),
     );
   } catch {
     // Never let audit-write failure block or alter a sign-in decision. The sign-in outcome

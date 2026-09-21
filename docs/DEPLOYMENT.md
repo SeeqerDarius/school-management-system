@@ -299,6 +299,26 @@ clock that starts when children's data is involved.
 
 ---
 
+## The application must not be reachable except through Vercel
+
+This is a requirement the sign-in throttle depends on, not a general preference.
+
+The limiter counts failed attempts per client address, and it learns that address from a
+forwarded header. `x-vercel-forwarded-for` is set by the platform and a caller cannot forge it,
+which is why it is preferred — but the fallback, `x-forwarded-for`, is an ordinary request header
+that is only trustworthy because a proxy overwrites it.
+
+Put the application anywhere a client can reach it directly — a container exposed on its own
+hostname, a tunnel opened for debugging, a second origin pointed at the same deployment — and the
+per-address limit is bypassed completely: a fresh allowance for every fabricated address, at no
+cost to the attacker. **That is worse than having no limiter**, because the account limit still
+holds and the dashboard still reports a control that is doing nothing.
+
+The account limit is unaffected, since it keys on the address being signed in to rather than on
+where the request came from. It is the one carrying the weight if this assumption is ever broken.
+
+---
+
 ## Secrets
 
 - Rotate `NEXTAUTH_SECRET` and every session is invalidated at once. That is the intended emergency

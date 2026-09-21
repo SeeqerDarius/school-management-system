@@ -36,6 +36,8 @@ deployment until an operator repoints `DATABASE_URL` at the restricted role — 
 | Database invariants | Ordering, non-overlap (exclusion constraints), one-current partial unique indexes, closure recorded, system role code uniqueness | `prisma/migrations/20260919091000_*` |
 | CI | Secret scan, typecheck, lint, unit tests, build, migrations against real PostgreSQL, drift check, idempotent-seed check, tenant isolation suite | `.github/workflows/ci.yml` |
 | Data API lockdown | Deny-all RLS on every table plus REVOKE from `anon`/`authenticated`, idempotent and portable to plain PostgreSQL | `prisma/migrations/20260919092000_data_api_lockdown` |
+| Sign-in throttling | Escalating lockout per account and per client address, counted from `security_event` and checked before the bcrypt compare; a refusal is logged under its own event type so a lock cannot be held open | `src/server/auth/throttle.ts`, `src/lib/sign-in-throttle.ts` |
+| Content-Security-Policy | Per-request nonce with `strict-dynamic`, issued from middleware; `base-uri`, `form-action`, `object-src` and `frame-ancestors` closed | `src/middleware.ts` |
 | Tenant isolation in the database | Per-tenant policies on every table carrying `tenantId`, read by a transaction-bound `app.tenant_id`; a `NOBYPASSRLS` role to connect as. Not live until an operator repoints `DATABASE_URL` | `prisma/migrations/20260921030000_tenant_rls_policies`, `src/server/db-context.ts` |
 
 ---
@@ -74,13 +76,27 @@ Two smaller things worth knowing:
 - `app_user` has no INSERT policy, so the application cannot create users. That is correct today
   — there is no invitation flow (weakness 5) — and will need one when there is.
 
-### 2. No sign-in throttling
+### 2. Throttling covers sign-in and nothing else
 
-`recordSecurityEvent` writes every failure, so the trail exists. Nothing acts on it. Credential
-stuffing against parent accounts is currently limited only by Vercel's platform-level rate limits.
+Sign-in is throttled: five wrong passwords against one account in fifteen minutes locks it for a
+minute, and the ladder climbs steeply from there. It is counted from the security log rather than
+a second table, so the limit and the audit trail cannot disagree about what happened, and it is
+checked before the bcrypt comparison — verified by signing in with the *correct* password during
+a lock and being refused, which is only true if the limiter sits in front.
 
-*What it takes:* a counter per account and per IP with an escalating lockout, checked before the
-bcrypt compare.
+Three limits worth knowing:
+
+- **It covers the sign-in path only.** §84 also asks for limits on exports, messaging, SMS
+  dispatch, payment initiation and file upload. Those arrive with the modules that need them.
+- **It trusts the proxy's forwarded address.** `x-vercel-forwarded-for` cannot be set by a
+  caller, but the fallback `x-forwarded-for` can — so the application must be unreachable except
+  through Vercel. Expose it directly and a forged header earns a fresh allowance per fabricated
+  address, which is worse than no limiter because the dashboard still says there is one. Recorded
+  as a deployment requirement in `docs/DEPLOYMENT.md`.
+- **A determined attacker can still lock one known account out** for a minute at a time by
+  failing against it deliberately. That is inherent to account lockout; the mitigation here is
+  that a throttled attempt is recorded as `SIGN_IN_THROTTLED` and is *not* counted as a failure,
+  so the lock always decays rather than being held open indefinitely by continued knocking.
 
 ### 3. No breached-password check
 
@@ -90,10 +106,17 @@ credential-stuffing list in circulation.
 *What it takes:* the Have I Been Pwned range API — k-anonymity, so no password or full hash leaves
 the server — checked at password set time.
 
-### 4. No Content-Security-Policy
+### 4. The Content-Security-Policy still allows inline styles
 
-`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy` and `Permissions-Policy` are set.
-A nonce-based `script-src` is not, so an injected inline script would execute.
+`script-src` is nonce-based with `strict-dynamic`, and a browser was used to confirm it: a
+parser-inserted `<script>` spliced into the page — inline and by `src` — is refused, while the
+application still renders and hydrates with no violations. `base-uri`, `form-action`,
+`object-src` and `frame-ancestors` are closed too.
+
+`style-src` keeps `'unsafe-inline'`, because Next injects inline styles during hydration and for
+font loading and nonce-ing them is not reliably supported. Injected CSS can restyle a page and
+exfiltrate through selectors; it cannot execute. That makes it a smaller hole than the one that
+closed, but it is a hole and it is not being described as anything else.
 
 ### 5. No invitation flow
 
@@ -168,10 +191,13 @@ exists.
 | `tests/db/tenant-isolation.test.ts` | `npm run test:db` | Cross-tenant read, update, delete and write-by-claim all fail, against real PostgreSQL |
 | `tests/db/calendar-constraints.test.ts` | `npm run test:db` | The database, not the application, refuses overlapping and backwards periods |
 | `tests/db/data-api-lockdown.test.ts` | `npm run test:db` | No table lacks RLS; the Data API roles hold nothing; btree_gist is out of `public` |
+| `src/lib/sign-in-throttle.test.ts` | `npm test` | Every rung of the lockout ladder, on both sides of each boundary, and that a lock counts down from the most recent failure |
+| `src/middleware.test.ts` | `npm test` | The CSP carries a fresh nonce per response, never allows eval in production, and keeps `base-uri`/`form-action`/`object-src` closed |
+| `tests/db/sign-in-throttle.test.ts` | `npm run test:db` | The limiter counts the right rows over the right window; a nonexistent account throttles like a real one; a refusal is not counted as a failure |
 | `tests/db/rls-policies.test.ts` | `npm run test:db` | Connecting **as the non-bypassing role**: an unbound transaction reads nothing, a bound one reads only its own school, cross-tenant write-by-claim is refused by PostgreSQL, and a school can still do its own work |
 
-**Not tested yet:** the sign-in path end to end, the calendar actions against a database, session
-revocation, permission resolution with DENY grants. Those need either a database fixture with
+**Not tested yet:** the calendar actions against a database, session revocation, permission
+resolution with DENY grants. Those need either a database fixture with
 seeded users or a browser test, and neither exists.
 
 There is no coverage threshold. A percentage would measure lines executed, not behaviour asserted,
