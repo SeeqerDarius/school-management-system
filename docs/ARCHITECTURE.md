@@ -65,22 +65,29 @@ into every `where` and every `create`, and **throws** on any operation it does n
 than letting it run unscoped. The tenant is resolved from the authenticated principal's
 **membership**, never from a request header, body, query parameter or subdomain.
 
-> **Known weakness, stated plainly.** Row-level security *is* enabled on every table, but as a
-> deny-all wall around Supabase's Data API — not as tenant isolation. Prisma connects as
-> `postgres`, which carries `BYPASSRLS`, so those policies are skipped for this application's own
-> queries. Tenant isolation therefore still rests entirely on the client extension, which lives in
-> the application: a `$queryRaw` bypasses it.
->
-> A tenant-policy migration and a `withRlsTransaction` helper are drafted, but the migration has
-> not been validated or applied and the app still connects as `postgres`. The helper binds
-> `app.tenant_id` with `set_config` inside a transaction. Do not point `DATABASE_URL` at a
-> non-bypassing role yet: authentication and existing calendar reads still have paths that do not
-> establish that variable. The remaining cutover gates are tracked in
-> [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md).
->
-> Until it lands the guards are `src/server/tenantScopeCoverage.test.ts`, which fails the build if
-> a model gains a `tenantId` and is not scoped, and `tests/db/tenant-isolation.test.ts`, which
-> proves the behaviour against real PostgreSQL.
+The database enforces the same rule underneath, and that is the stronger half. Migration
+`20260921030000_tenant_rls_policies` adds per-tenant policies to every table carrying a
+`tenantId`, and creates `sankofa_app` — a login role declared `NOBYPASSRLS`, so the policies
+actually bind. The policies read `app.tenant_id`, a transaction-local setting bound by
+`src/server/db-context.ts`; an unbound transaction matches nothing, so forgetting to bind loses
+data rather than leaking it.
+
+`inTenantTransaction()` is the only way to get a scoped client, and it binds both controls at
+once — there is no way to take the weaker one by accident.
+
+> **The operational half is not automatic.** The role ships `NOLOGIN` and without a password,
+> because a password in a migration is a password in git. Until an operator grants it and points
+> `DATABASE_URL` at it — see [DEPLOYMENT.md](DEPLOYMENT.md) — the application still connects as
+> `postgres`, which carries `BYPASSRLS`, and the policies are inert in that deployment however
+> green the tests are. The code is correct under both roles; only the connection string decides
+> which controls are live.
+
+Three guards, and the third is the one that matters: `tenantScopeCoverage.test.ts` fails if a
+model gains a `tenantId` and is not scoped; `tests/db/tenant-isolation.test.ts` proves the
+application-side behaviour; `tests/db/rls-policies.test.ts` connects **as `sankofa_app`** and
+proves the database refuses cross-tenant reads, updates, deletes and writes-by-claim on its own.
+That last one is deliberate — a catalog check for `relrowsecurity` cannot tell enforcement from
+theatre, and asking the question over a bypassing connection answers it vacuously.
 
 ### I-2 Money is decimal and carries its currency
 

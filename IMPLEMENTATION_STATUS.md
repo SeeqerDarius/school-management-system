@@ -4,7 +4,8 @@
 > weak. If a feature is not listed as built here, assume it is not built, whatever a document or a
 > comment elsewhere implies.
 >
-> Last reviewed: 2026-09-19, after the stack change recorded in
+> Last reviewed: 2026-09-21, after row-level security became a real control
+> (`20260921030000_tenant_rls_policies`). The stack change itself is recorded in
 > [ADR 0010](docs/adr/0010-nextjs-fullstack-on-vercel.md).
 
 ---
@@ -15,7 +16,10 @@ The foundation is built and tested: tenancy, identity, authorization, the academ
 sign-in. Student, guardian and enrolment schemas plus a first student workflow are in progress and
 not yet released. Attendance, fees, accounting, HR and payroll are not built.
 
-One known weakness matters more than the rest and is at the top of the list below.
+The weakness that mattered most — tenant isolation resting entirely on application code — is
+closed in the codebase as of `20260921030000_tenant_rls_policies`. It is **not** closed in any
+deployment until an operator repoints `DATABASE_URL` at the restricted role — two steps, in
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#5-switch-to-the-restricted-database-role).
 
 ---
 
@@ -32,48 +36,43 @@ One known weakness matters more than the rest and is at the top of the list belo
 | Database invariants | Ordering, non-overlap (exclusion constraints), one-current partial unique indexes, closure recorded, system role code uniqueness | `prisma/migrations/20260919091000_*` |
 | CI | Secret scan, typecheck, lint, unit tests, build, migrations against real PostgreSQL, drift check, idempotent-seed check, tenant isolation suite | `.github/workflows/ci.yml` |
 | Data API lockdown | Deny-all RLS on every table plus REVOKE from `anon`/`authenticated`, idempotent and portable to plain PostgreSQL | `prisma/migrations/20260919092000_data_api_lockdown` |
+| Tenant isolation in the database | Per-tenant policies on every table carrying `tenantId`, read by a transaction-bound `app.tenant_id`; a `NOBYPASSRLS` role to connect as. Not live until an operator repoints `DATABASE_URL` | `prisma/migrations/20260921030000_tenant_rls_policies`, `src/server/db-context.ts` |
 
 ---
 
 ## Known weaknesses
 
-### 1. Row-level security does not enforce tenancy — **highest priority** - IN PROGRESS
+### 1. Row-level security enforces tenancy — but only once an operator switches the role
 
-**Status:** Migration drafted (`20260920000000_rls_tenant_isolation`) but not yet applied or
-validated against a disposable PostgreSQL database. Its `sankofa_app` role is created without
-login; an operator must provision login and a strong password through the deployment secret
-manager before the application can connect as that role.
+Built in `20260921030000_tenant_rls_policies`, and proved by `tests/db/rls-policies.test.ts`,
+which runs **as `sankofa_app`**, the `NOBYPASSRLS` role the application is meant to connect as:
 
-RLS *is* enabled on every table as of migration `20260919092000_data_api_lockdown`, with no
-policies, which closes Supabase's Data API. That is worth having and it is **not** tenant
-isolation.
+- per-tenant policies on `academic_year`, `term`, `campus`, `branding`, `reference_sequence` and
+  `membership`; membership-derived rules for `membership_role` and `membership_permission_grant`;
+  read-shared-but-not-writable handling for `role`; scoped-read handling for `audit_log` and
+  `security_event`; a read-only catalogue for `permission` and `role_permission`;
+- `app.tenant_id`, `app.user_id` and `app.sign_in_email` bound per transaction by
+  `src/server/db-context.ts`, so an unbound transaction reads nothing;
+- 19 behavioural assertions: cross-tenant read, read-by-known-id, update, delete and
+  write-by-claim all refused by the database, and — the control that stops the suite passing
+  against a database nobody can use — a school creating and reading back its own rows.
 
-Prisma connects as `postgres`, which carries `BYPASSRLS`. Every policy is skipped for the
-application's own connection, so tenant isolation still rests entirely on the client extension in
-`src/server/tenant-scope.ts` — which lives in the application, and which a `$queryRaw` bypasses.
-The previous Java implementation had real RLS with a non-superuser role and proved it in tests.
-That was lost in the stack change and is not being presented as anything else. See ADR 0010.
+**What is not done, and it is the half that decides whether any of it is live.** The role ships
+`NOLOGIN` and without a password, because a password in a migration is a password in git. Until
+somebody runs the two steps in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — grant it a password,
+repoint `DATABASE_URL` — the deployed application still connects as `postgres`, which carries
+`BYPASSRLS`, and every policy above is skipped in that deployment. CI proves the policies work;
+CI cannot prove production is using them.
 
-**Progress:**
-- ⏳ Drafted migration with per-tenant RLS policies for all tenant-owned tables
-- ⏳ Drafted sankofa_app role without BYPASSRLS or an embedded password
-- ⏳ Added withRlsTransaction helper using a bound tenant value for the session variable
-- ⏳ Drafted RLS test suite; database execution remains outstanding
-- ⏳ Migration needs to be applied (requires local PostgreSQL for development)
-- ⏳ DATABASE_URL needs to switch to sankofa_app role
-- ⏳ Existing queries need to move into transactions for session variable support
+So the honest status is: **the control exists and is tested; enabling it is an operator action
+that has not been taken.** Do not read a green pipeline as "production enforces tenancy".
 
-**What remains:**
+Two smaller things worth knowing:
 
-1. Apply the migration: `npm run db:deploy` (after testing locally)
-2. Update DATABASE_URL to use sankofa_app role instead of postgres
-3. Set secure password for sankofa_app role in production
-4. Convert existing data.ts reads to use transactions where needed
-5. Verify RLS enforcement in production environment
-
-The migration is a draft, not ready to apply: validate it on a disposable database, finish the
-transaction coverage, then provision the login role from the deployment secret manager. Keep
-application-level scoping in `tenant-scope.ts` as defense-in-depth after RLS is enabled.
+- `$queryRaw` still bypasses the *application* filter, but no longer the database's. There are
+  currently no raw queries in `src/`.
+- `app_user` has no INSERT policy, so the application cannot create users. That is correct today
+  — there is no invitation flow (weakness 5) — and will need one when there is.
 
 ### 2. No sign-in throttling
 
@@ -169,8 +168,7 @@ exists.
 | `tests/db/tenant-isolation.test.ts` | `npm run test:db` | Cross-tenant read, update, delete and write-by-claim all fail, against real PostgreSQL |
 | `tests/db/calendar-constraints.test.ts` | `npm run test:db` | The database, not the application, refuses overlapping and backwards periods |
 | `tests/db/data-api-lockdown.test.ts` | `npm run test:db` | No table lacks RLS; the Data API roles hold nothing; btree_gist is out of `public` |
-| `tests/db/rls-tenant-isolation.test.ts` | `npm run test:db` | Tenant policies deny unscoped reads, isolate School A from B, and reject cross-school student-campus links |
-| `tests/db/rls-tenant-isolation.test.ts` | `npm run test:db` | Tenant policies deny unscoped reads, isolate School A from B, and reject cross-school student-campus links |
+| `tests/db/rls-policies.test.ts` | `npm run test:db` | Connecting **as the non-bypassing role**: an unbound transaction reads nothing, a bound one reads only its own school, cross-tenant write-by-claim is refused by PostgreSQL, and a school can still do its own work |
 
 **Not tested yet:** the sign-in path end to end, the calendar actions against a database, session
 revocation, permission resolution with DENY grants. Those need either a database fixture with

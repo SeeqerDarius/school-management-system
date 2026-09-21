@@ -1,6 +1,6 @@
 import 'server-only';
 
-import { db } from '@/server/db';
+import { withRequestContext } from '@/server/db-context';
 
 /**
  * Resolves what a membership may actually do.
@@ -13,20 +13,28 @@ import { db } from '@/server/db';
  * <p>Expired grants are ignored, so a temporary elevation lapses on its own rather than
  * depending on somebody remembering to revoke it.
  */
-export async function effectivePermissions(membershipId: string): Promise<Set<string>> {
-  const [roleGrants, directGrants] = await Promise.all([
-    db.rolePermission.findMany({
-      where: { role: { memberEntries: { some: { membershipId } } } },
-      select: { permission: { select: { code: true } } },
-    }),
-    db.membershipPermissionGrant.findMany({
-      where: {
-        membershipId,
-        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
-      },
-      select: { effect: true, permission: { select: { code: true } } },
-    }),
-  ]);
+export async function effectivePermissions(
+  membershipId: string,
+  userId: string,
+): Promise<Set<string>> {
+  // The user is bound, not a tenant: this runs while the session is being assembled, which is
+  // before the active school is settled. The policy on membership_permission_grant resolves
+  // through the membership, which that binding makes visible — and only this user's.
+  const [roleGrants, directGrants] = await withRequestContext({ userId }, (tx) =>
+    Promise.all([
+      tx.rolePermission.findMany({
+        where: { role: { memberEntries: { some: { membershipId } } } },
+        select: { permission: { select: { code: true } } },
+      }),
+      tx.membershipPermissionGrant.findMany({
+        where: {
+          membershipId,
+          OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }],
+        },
+        select: { effect: true, permission: { select: { code: true } } },
+      }),
+    ]),
+  );
 
   const allowed = new Set(roleGrants.map((g) => g.permission.code));
 
@@ -48,18 +56,20 @@ export async function effectivePermissions(membershipId: string): Promise<Set<st
  * survives, but nobody can work in a school whose subscription has lapsed.
  */
 export async function membershipsForUser(userId: string) {
-  return db.membership.findMany({
-    where: {
-      userId,
-      status: 'ACTIVE',
-      tenant: { status: { in: ['TRIAL', 'ACTIVE', 'PAST_DUE'] } },
-    },
-    select: {
-      id: true,
-      tenantId: true,
-      principalType: true,
-      tenant: { select: { slug: true, displayName: true } },
-    },
-    orderBy: { tenant: { displayName: 'asc' } },
-  });
+  return withRequestContext({ userId }, (tx) =>
+    tx.membership.findMany({
+      where: {
+        userId,
+        status: 'ACTIVE',
+        tenant: { status: { in: ['TRIAL', 'ACTIVE', 'PAST_DUE'] } },
+      },
+      select: {
+        id: true,
+        tenantId: true,
+        principalType: true,
+        tenant: { select: { slug: true, displayName: true } },
+      },
+      orderBy: { tenant: { displayName: 'asc' } },
+    }),
+  );
 }

@@ -4,7 +4,7 @@ import type { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import bcrypt from 'bcryptjs';
 
-import { db } from '@/server/db';
+import { withRequestContext } from '@/server/db-context';
 import { effectivePermissions, membershipsForUser } from '@/server/auth/permissions';
 
 /**
@@ -49,16 +49,21 @@ export const authOptions: NextAuthOptions = {
         const password = credentials?.password;
         if (!email || !password) return null;
 
-        const user = await db.appUser.findUnique({
-          where: { email },
-          select: {
-            id: true,
-            email: true,
-            fullName: true,
-            status: true,
-            passwordHash: true,
-          },
-        });
+        // Bound to the address being authenticated, and nothing else. The row-level security
+        // policy on app_user admits exactly that one row to an otherwise anonymous transaction,
+        // so a query here cannot return the user table even if it forgets its where clause.
+        const user = await withRequestContext({ signInEmail: email }, (tx) =>
+          tx.appUser.findUnique({
+            where: { email },
+            select: {
+              id: true,
+              email: true,
+              fullName: true,
+              status: true,
+              passwordHash: true,
+            },
+          }),
+        );
 
         // Every failure below returns the same null, so the response cannot be used to work out
         // which email addresses have accounts. The timing is evened out by always running a
@@ -76,10 +81,12 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
-        await db.appUser.update({
-          where: { id: user.id },
-          data: { lastLoginAt: new Date() },
-        });
+        await withRequestContext({ userId: user.id }, (tx) =>
+          tx.appUser.update({
+            where: { id: user.id },
+            data: { lastLoginAt: new Date() },
+          }),
+        );
         await recordSecurityEvent(user.id, 'SIGN_IN_SUCCEEDED', 'INFO');
 
         return { id: user.id, email: user.email, name: user.fullName };
@@ -103,10 +110,15 @@ export const authOptions: NextAuthOptions = {
         if (requested === null) {
           token.activeMembershipId = null;
         } else {
-          const held = await db.membership.findFirst({
-            where: { id: requested, userId: token.userId as string, status: 'ACTIVE' },
-            select: { id: true },
-          });
+          // No tenant is bound: the whole question is which school to switch to. The policy
+          // allows a user to see their own memberships in that state and nobody else's, so a
+          // client naming somebody else's membership id gets null from the database itself.
+          const held = await withRequestContext({ userId: token.userId as string }, (tx) =>
+            tx.membership.findFirst({
+              where: { id: requested, userId: token.userId as string, status: 'ACTIVE' },
+              select: { id: true },
+            }),
+          );
           token.activeMembershipId = held?.id ?? null;
         }
       }
@@ -120,10 +132,12 @@ export const authOptions: NextAuthOptions = {
 
       // A password change or an administrative revocation advances `sessionsValidFrom`,
       // invalidating tokens issued before it without waiting for them to expire.
-      const user = await db.appUser.findUnique({
-        where: { id: userId },
-        select: { status: true, sessionsValidFrom: true },
-      });
+      const user = await withRequestContext({ userId }, (tx) =>
+        tx.appUser.findUnique({
+          where: { id: userId },
+          select: { status: true, sessionsValidFrom: true },
+        }),
+      );
 
       const issuedAt = token.issuedAt as number | undefined;
       const revoked =
@@ -156,7 +170,7 @@ export const authOptions: NextAuthOptions = {
         if (active) {
           session.tenantId = active.tenantId;
           session.tenantSlug = active.tenant.slug;
-          session.permissions = [...(await effectivePermissions(activeMembershipId))];
+          session.permissions = [...(await effectivePermissions(activeMembershipId, userId))];
         } else {
           session.activeMembershipId = null;
           session.permissions = [];
@@ -182,7 +196,11 @@ async function recordSecurityEvent(
   severity: 'INFO' | 'NOTICE' | 'WARNING' | 'CRITICAL',
 ) {
   try {
-    await db.securityEvent.create({ data: { userId, eventType, severity } });
+    // No tenant, and often no user: a refused sign-in is exactly the case the write policy has
+    // to admit, and the read policy with it — Prisma's create() returns the row it wrote.
+    await withRequestContext({ userId }, (tx) =>
+      tx.securityEvent.create({ data: { userId, eventType, severity } }),
+    );
   } catch {
     // Never let audit-write failure block or alter a sign-in decision. The sign-in outcome
     // is the user-facing contract; losing one log row is regrettable, refusing a legitimate

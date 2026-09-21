@@ -178,9 +178,8 @@ curl -s "https://<project-ref>.supabase.co/rest/v1/app_user?select=id&limit=1" -
 
 **Until this step is taken, the row-level security policies enforce nothing in this deployment.**
 
-`20260920000000_rls_tenant_isolation` creates `sankofa_app`, a role declared `NOBYPASSRLS`, and
-writes the per-tenant policies that bind to it; `20260921130000_app_user_policies` adds the ones
-`app_user` needs, without which signing in as this role finds no readable user row. It creates the role `NOLOGIN` and without a
+`20260921030000_tenant_rls_policies` creates `sankofa_app`, a role declared `NOBYPASSRLS`, and
+writes the per-tenant policies that bind to it. It creates the role `NOLOGIN` and without a
 password on purpose — a password written into a migration is a password in git, readable by
 everyone with the repository and preserved in its history forever.
 
@@ -192,22 +191,12 @@ ALTER ROLE sankofa_app WITH LOGIN PASSWORD '<generate 32+ random characters>';
 ```
 
 Then repoint both connection strings at it — the pooled one the application uses and the direct
-one migrations use. Keep the shape shown in `.env.example` and change only the credentials:
+one migrations use:
 
-| | `DATABASE_URL` | `DIRECT_URL` |
-| --- | --- | --- |
-| User | `sankofa_app.<project-ref>` | `sankofa_app.<project-ref>` |
-| Password | the value generated above | the same |
-| Port | 6543, Supavisor transaction mode | 5432, session mode |
-| Query string | keep `pgbouncer=true` and the rest | keep as it is |
-
-Everything else — host, database name, `sslmode` — stays exactly as it was. Only the user and
-password change.
-
-(This file states the parts rather than a full URL on purpose: the CI secret scan matches
-anything URL-shaped carrying a password and cannot tell a placeholder from a paste. Rewording is
-the fix; excluding `docs/` from the scan would let a genuinely pasted credential through a
-security gate, which AGENTS.md rule 2 forbids.)
+```
+DATABASE_URL = postgresql://sankofa_app.<project-ref>:<password>@<pooler-host>:6543/postgres?pgbouncer=true
+DIRECT_URL   = postgresql://sankofa_app.<project-ref>:<password>@<pooler-host>:5432/postgres
+```
 
 Redeploy so the functions pick up the new values. Nothing else changes: the application code is
 identical under either role, because it binds `app.tenant_id` on every transaction regardless of

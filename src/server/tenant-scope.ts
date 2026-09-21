@@ -1,8 +1,10 @@
 import 'server-only';
 
 import { Prisma } from '@prisma/client';
+import type { ITXClientDenyList } from '@prisma/client/runtime/library';
 
 import { db } from '@/server/db';
+import { bindRequestContext } from '@/server/db-context';
 
 /**
  * A Prisma client that cannot read or write outside one tenant.
@@ -23,16 +25,16 @@ import { db } from '@/server/db';
  * const years = await tx.academicYear.findMany();   // already scoped
  * ```
  *
- * <h2>Row-Level Security Support</h2>
- * When using transactions, this client automatically sets the `app.tenant_id` session variable
- * for RLS policies. For RLS to be effective:
- * 1. Use `$transaction` for all tenant-aware operations
- * 2. Eventually switch DATABASE_URL to use the sankofa_app role (without BYPASSRLS)
+ * <h2>How it relates to row-level security</h2>
+ * It is not the only control any more, and it is the weaker of the two. The policies added in
+ * `20260921030000_tenant_rls_policies` enforce the same rule inside PostgreSQL, where a raw
+ * query cannot reach past it. This extension still earns its place: it means a developer never
+ * writes the filter, so the database's answer and the application's agree by construction
+ * rather than by diligence — and when they disagree, the database wins.
  *
- * <h2>What it deliberately does not do</h2>
- * The application-level scoping remains as defense-in-depth even after RLS is enabled,
- * because RLS alone does not protect against application bugs that use $queryRaw to bypass
- * the client extension.
+ * <p>Both are bound by {@link inTenantTransaction}, which is the only way to obtain a scoped
+ * client that the policies will also accept. Using {@link forTenant} directly gives you the
+ * application-side filter with no context bound, which under the restricted role reads nothing.
  */
 
 /**
@@ -96,6 +98,34 @@ const READ_OPERATIONS = new Set([
 const WRITE_WITH_WHERE = new Set(['update', 'updateMany', 'delete', 'deleteMany']);
 
 export type TenantClient = ReturnType<typeof forTenant>;
+
+/** The scoped client as it appears inside a transaction: no `$transaction`, no `$connect`. */
+export type TenantTx = Omit<TenantClient, ITXClientDenyList>;
+
+/**
+ * The one way to do tenant-owned work.
+ *
+ * <p>Opens a transaction, binds the request context the row-level security policies read, and
+ * hands back a client that also carries the application-side tenant filter. Both controls, one
+ * call, and no way to take only the weaker one by accident.
+ *
+ * ```ts
+ * const years = await inTenantTransaction(session, (db) => db.academicYear.findMany());
+ * ```
+ *
+ * <p>Reads go in here as well as writes. A read outside a transaction has no tenant bound, and
+ * under the restricted role the policies answer it with nothing — correctly, but confusingly, so
+ * the shape is the same for both rather than a rule to remember.
+ */
+export async function inTenantTransaction<T>(
+  context: { tenantId: string; userId?: string | undefined },
+  work: (db: TenantTx) => Promise<T>,
+): Promise<T> {
+  return forTenant(context.tenantId).$transaction(async (tx) => {
+    await bindRequestContext(tx, { tenantId: context.tenantId, userId: context.userId });
+    return work(tx);
+  });
+}
 
 export function forTenant(tenantId: string) {
   if (!tenantId) {

@@ -59,11 +59,17 @@ Two tests hold that in place, and both are release gates:
   attacker would: can I read their row knowing its id, change it, delete it, write into their
   school by claiming to be them.
 
-Row-level security **is** on every table — but its applied policies are a deny-all wall around
-Supabase's Data API, not tenant isolation. A separate tenant-policy migration is drafted but not
-applied. Prisma still connects as `postgres`, which has `BYPASSRLS`, so those policies would not
-yet enforce tenancy for application queries. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)
-for the remaining cutover gates.
+Underneath it, PostgreSQL enforces the same rule itself. Every table carrying a `tenantId` has a
+per-tenant policy reading a transaction-bound setting, and there is a `NOBYPASSRLS` role to
+connect as — so a query that escapes the application filter still gets nothing.
+`tests/db/rls-policies.test.ts` proves it as that role, because a catalog check for "RLS is on"
+cannot tell enforcement from theatre.
+
+One caveat, and it is the one that decides whether any of this is live: the role ships without a
+password, and until an operator grants it and repoints `DATABASE_URL`
+([DEPLOYMENT.md](docs/DEPLOYMENT.md#5-switch-to-the-restricted-database-role)) the deployed
+application still connects as `postgres` and the policies are skipped. Green tests are not a
+statement about production.
 
 ---
 
