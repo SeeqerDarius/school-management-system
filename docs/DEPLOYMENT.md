@@ -230,6 +230,14 @@ Do it with a one-off script against production using the same bcrypt work factor
 **Never insert a user row by hand with a password hash from somewhere else.** A hash copied from a
 development database is a development password in production.
 
+Everybody after that is invited from **People** inside the school — the first administrator is
+the only account that has to be created out of band, because somebody has to exist before anybody
+can be invited.
+
+Note that invitations are not emailed: there is no provider configured, so the link is shown once
+to whoever issued it, to pass on. It works once and expires in seven days. Treat it as a
+credential in transit — anyone holding it can set the password for that account.
+
 ---
 
 ## Every deployment after that

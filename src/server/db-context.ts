@@ -32,6 +32,10 @@ export interface RequestContext {
   userId?: string | null | undefined;
   /** The address being authenticated. Set during sign-in only, and never alongside a tenant. */
   signInEmail?: string | null | undefined;
+  /** The address an invitation is being issued to. Lets the issuer create exactly that user. */
+  inviteEmail?: string | null | undefined;
+  /** The hashed invite token an anonymous visitor is redeeming. Finds one row and no other. */
+  inviteTokenHash?: string | null | undefined;
 }
 
 /**
@@ -50,6 +54,8 @@ export async function bindRequestContext(
   await tx.$executeRaw`SELECT set_config('app.tenant_id', ${context.tenantId ?? ''}, true)`;
   await tx.$executeRaw`SELECT set_config('app.user_id', ${context.userId ?? ''}, true)`;
   await tx.$executeRaw`SELECT set_config('app.sign_in_email', ${context.signInEmail ?? ''}, true)`;
+  await tx.$executeRaw`SELECT set_config('app.invite_email', ${context.inviteEmail ?? ''}, true)`;
+  await tx.$executeRaw`SELECT set_config('app.invite_token_hash', ${context.inviteTokenHash ?? ''}, true)`;
 }
 
 /**

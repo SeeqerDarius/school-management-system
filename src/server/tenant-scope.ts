@@ -4,7 +4,7 @@ import { Prisma } from '@prisma/client';
 import type { ITXClientDenyList } from '@prisma/client/runtime/library';
 
 import { db } from '@/server/db';
-import { bindRequestContext } from '@/server/db-context';
+import { bindRequestContext, type RequestContext } from '@/server/db-context';
 
 /**
  * A Prisma client that cannot read or write outside one tenant.
@@ -118,11 +118,11 @@ export type TenantTx = Omit<TenantClient, ITXClientDenyList>;
  * the shape is the same for both rather than a rule to remember.
  */
 export async function inTenantTransaction<T>(
-  context: { tenantId: string; userId?: string | undefined },
+  context: RequestContext & { tenantId: string },
   work: (db: TenantTx) => Promise<T>,
 ): Promise<T> {
   return forTenant(context.tenantId).$transaction(async (tx) => {
-    await bindRequestContext(tx, { tenantId: context.tenantId, userId: context.userId });
+    await bindRequestContext(tx, context);
     return work(tx);
   });
 }

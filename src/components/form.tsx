@@ -83,15 +83,22 @@ export function Field({
   error,
   hint,
   placeholder,
+  autoComplete,
 }: {
   label: string;
   name: string;
-  type?: 'text' | 'date' | 'number';
+  type?: 'text' | 'date' | 'number' | 'email' | 'password';
   defaultValue?: string;
   required?: boolean;
   error?: string | undefined;
   hint?: string;
   placeholder?: string;
+  /**
+   * Passed through so password managers behave. `new-password` on a field somebody is choosing
+   * a password in is what makes a manager offer to generate and store one, and leaving it off
+   * is a large part of why people type the same password everywhere.
+   */
+  autoComplete?: string;
 }) {
   const id = useId();
   const errorId = `${id}-error`;
@@ -122,6 +129,7 @@ export function Field({
         defaultValue={defaultValue}
         required={required}
         placeholder={placeholder}
+        autoComplete={autoComplete}
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy.length > 0 ? describedBy : undefined}
         className={clsx(
@@ -159,5 +167,85 @@ export function FormMessage({ message, tone }: { message: string; tone: 'error' 
     >
       {message}
     </p>
+  );
+}
+
+/**
+ * A labelled select.
+ *
+ * <p>Same wiring as {@link Field}: a real label, and errors associated through
+ * `aria-describedby` rather than signalled by colour alone.
+ */
+export function SelectField({
+  label,
+  name,
+  options,
+  defaultValue,
+  required,
+  error,
+  hint,
+  placeholder,
+}: {
+  label: string;
+  name: string;
+  options: ReadonlyArray<{ value: string; label: string }>;
+  defaultValue?: string;
+  required?: boolean;
+  error?: string | undefined;
+  hint?: string;
+  /** Shown as a non-selectable first row when nothing is chosen yet. */
+  placeholder?: string;
+}) {
+  const id = useId();
+  const errorId = `${id}-error`;
+  const hintId = `${id}-hint`;
+  const describedBy = [error ? errorId : null, hint ? hintId : null].filter(Boolean).join(' ');
+
+  return (
+    <div className="flex min-w-0 flex-col gap-1">
+      <label htmlFor={id} className="text-sm font-medium text-[var(--color-ink)]">
+        {label}
+        {required && (
+          <>
+            <span aria-hidden="true" className="ml-0.5 text-[var(--color-danger)]">
+              *
+            </span>
+            <span className="sr-only"> (required)</span>
+          </>
+        )}
+      </label>
+
+      <select
+        id={id}
+        name={name}
+        defaultValue={defaultValue ?? ''}
+        required={required}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy.length > 0 ? describedBy : undefined}
+        className={clsx(
+          'rounded-[var(--radius-control)] border bg-[var(--color-surface)] px-2.5 py-1.5',
+          'text-sm text-[var(--color-ink)] min-h-9',
+          error ? 'border-[var(--color-danger)]' : 'border-[var(--color-border-strong)]',
+        )}
+      >
+        {placeholder && <option value="">{placeholder}</option>}
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+
+      {hint && (
+        <p id={hintId} className="text-xs text-[var(--color-ink-muted)]">
+          {hint}
+        </p>
+      )}
+      {error && (
+        <p id={errorId} className="text-xs font-medium text-[var(--color-danger)]">
+          {error}
+        </p>
+      )}
+    </div>
   );
 }

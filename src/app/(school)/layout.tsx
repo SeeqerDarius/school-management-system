@@ -60,6 +60,16 @@ export default async function SchoolLayout({
                   </Link>
                 </li>
               )}
+              <li>
+                <Link
+                  href="/settings/people"
+                  className="rounded-[var(--radius-control)] px-2.5 py-1.5
+                             text-[var(--color-ink-muted)] hover:bg-[var(--color-surface-sunken)]
+                             hover:text-[var(--color-ink)]"
+                >
+                  People
+                </Link>
+              </li>
             </ul>
           </nav>
 

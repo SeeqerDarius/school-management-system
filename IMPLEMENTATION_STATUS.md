@@ -4,8 +4,8 @@
 > weak. If a feature is not listed as built here, assume it is not built, whatever a document or a
 > comment elsewhere implies.
 >
-> Last reviewed: 2026-09-21, after row-level security became a real control
-> (`20260921030000_tenant_rls_policies`). The stack change itself is recorded in
+> Last reviewed: 2026-09-21, after row-level security became a real control and the invitation
+> flow made it possible for a person to have an account at all. The stack change is recorded in
 > [ADR 0010](docs/adr/0010-nextjs-fullstack-on-vercel.md).
 
 ---
@@ -36,6 +36,7 @@ deployment until an operator repoints `DATABASE_URL` at the restricted role — 
 | Database invariants | Ordering, non-overlap (exclusion constraints), one-current partial unique indexes, closure recorded, system role code uniqueness | `prisma/migrations/20260919091000_*` |
 | CI | Secret scan, typecheck, lint, unit tests, build, migrations against real PostgreSQL, drift check, idempotent-seed check, tenant isolation suite | `.github/workflows/ci.yml` |
 | Data API lockdown | Deny-all RLS on every table plus REVOKE from `anon`/`authenticated`, idempotent and portable to plain PostgreSQL | `prisma/migrations/20260919092000_data_api_lockdown` |
+| Invitations | Issue an invitation (creates the user with no password, the membership as INVITED, and a single-use 256-bit token stored only as a digest), redeem it to set a password and activate the membership. Screens for both. Delivery is by passing the link on — email is not wired | `src/features/people/**`, `src/lib/invitation.ts` |
 | Sign-in throttling | Escalating lockout per account and per client address, counted from `security_event` and checked before the bcrypt compare; a refusal is logged under its own event type so a lock cannot be held open | `src/server/auth/throttle.ts`, `src/lib/sign-in-throttle.ts` |
 | Content-Security-Policy | Per-request nonce with `strict-dynamic`, issued from middleware; `base-uri`, `form-action`, `object-src` and `frame-ancestors` closed | `src/middleware.ts` |
 | Tenant isolation in the database | Per-tenant policies on every table carrying `tenantId`, read by a transaction-bound `app.tenant_id`; a `NOBYPASSRLS` role to connect as. Not live until an operator repoints `DATABASE_URL` | `prisma/migrations/20260921030000_tenant_rls_policies`, `src/server/db-context.ts` |
@@ -53,7 +54,8 @@ which runs **as `sankofa_app`**, the `NOBYPASSRLS` role the application is meant
   `membership`; membership-derived rules for `membership_role` and `membership_permission_grant`;
   read-shared-but-not-writable handling for `role`; scoped-read handling for `audit_log` and
   `security_event`; a read-only catalogue for `permission` and `role_permission`;
-- `app.tenant_id`, `app.user_id` and `app.sign_in_email` bound per transaction by
+- `app.tenant_id`, `app.user_id`, `app.sign_in_email` and — since the invitation flow —
+  `app.invite_email` and `app.invite_token_hash`, all bound per transaction by
   `src/server/db-context.ts`, so an unbound transaction reads nothing;
 - 19 behavioural assertions: cross-tenant read, read-by-known-id, update, delete and
   write-by-claim all refused by the database, and — the control that stops the suite passing
@@ -73,8 +75,9 @@ Two smaller things worth knowing:
 
 - `$queryRaw` still bypasses the *application* filter, but no longer the database's. There are
   currently no raw queries in `src/`.
-- `app_user` has no INSERT policy, so the application cannot create users. That is correct today
-  — there is no invitation flow (weakness 5) — and will need one when there is.
+- `app_user` gained an INSERT policy in `20260921160000_invitation_policies`, admitting exactly
+  the one address named in `app.invite_email`. A bug that built the wrong row is refused by the
+  database, which `tests/db/invitation.test.ts` asserts by trying it.
 
 ### 2. Throttling covers sign-in and nothing else
 
@@ -118,10 +121,25 @@ font loading and nonce-ing them is not reliably supported. Injected CSS can rest
 exfiltrate through selectors; it cannot execute. That makes it a smaller hole than the one that
 closed, but it is a hole and it is not being described as anything else.
 
-### 5. No invitation flow
+### 5. Invitations work, but nothing emails them
 
-`AppUser.inviteTokenHash` exists in the schema. Nothing issues, sends or redeems an invitation, so
-the only way to create an account today is the seed or a manual insert. Email is unwired entirely.
+A school admin can invite somebody from **People**, and that person sets a password and signs in.
+Driven end to end in a browser: invite issued, link redeemed in a clean session, the invited
+teacher signed in and landed in the app, and replaying the same link was refused.
+
+What is missing is delivery. There is no email provider configured, so the link is shown to the
+person who issued it, once, to pass on. That is a usable product behaviour — a school office is
+as likely to send it over WhatsApp as by email — but it has two consequences worth stating:
+
+- **Redemption does not prove control of the address.** Following a link proves possession of
+  the link. `emailVerified` therefore stays `false`, and nothing yet sets it to true.
+- **A link handed to the wrong person is an account.** It expires in seven days and works once,
+  which bounds the exposure but does not remove it.
+
+Also not built: **withdrawing an invitation or ending a membership.** There is no way to remove
+somebody's access from the UI yet. Ending a membership is tenant-owned and straightforward; the
+reason it is not here is that it is membership management rather than invitation, and it wants
+its own change with a confirmation step.
 
 ### 6. No error tracking, no uptime monitoring, no independent backup
 
@@ -160,7 +178,12 @@ invariants are now held by review and by the tests named above.
 
 The whole product, essentially. Listed so nobody has to guess.
 
+<<<<<<< HEAD
 - Students, guardians, enrolment and admissions (in progress: schema, student list, admission and profile views; guardian and enrolment workflows remain incomplete)
+=======
+- Withdrawing an invitation, ending or suspending a membership
+- Students, guardians, enrolment, admissions
+>>>>>>> d234208 (feat(people): invitations, so somebody other than the seed can have an account)
 - Classes, subjects, timetable
 - Attendance
 - Assessment, grading, report cards
@@ -191,6 +214,8 @@ exists.
 | `tests/db/tenant-isolation.test.ts` | `npm run test:db` | Cross-tenant read, update, delete and write-by-claim all fail, against real PostgreSQL |
 | `tests/db/calendar-constraints.test.ts` | `npm run test:db` | The database, not the application, refuses overlapping and backwards periods |
 | `tests/db/data-api-lockdown.test.ts` | `npm run test:db` | No table lacks RLS; the Data API roles hold nothing; btree_gist is out of `public` |
+| `src/lib/invitation.test.ts` | `npm test` | Tokens are unique and 256-bit, the stored digest is not the token, expiry is inclusive at the boundary, and a missing expiry counts as expired |
+| `tests/db/invitation.test.ts` | `npm run test:db` | As the non-bypassing role: an invitation may create exactly the address it declared and no other; a token finds one user; a spent token finds nobody |
 | `src/lib/sign-in-throttle.test.ts` | `npm test` | Every rung of the lockout ladder, on both sides of each boundary, and that a lock counts down from the most recent failure |
 | `src/middleware.test.ts` | `npm test` | The CSP carries a fresh nonce per response, never allows eval in production, and keeps `base-uri`/`form-action`/`object-src` closed |
 | `tests/db/sign-in-throttle.test.ts` | `npm run test:db` | The limiter counts the right rows over the right window; a nonexistent account throttles like a real one; a refusal is not counted as a failure |
