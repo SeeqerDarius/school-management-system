@@ -2,6 +2,7 @@ import Link from 'next/link';
 
 import { SignOutButton } from '@/features/auth/components/sign-out-button';
 import { requireActiveSession } from '@/server/auth/session';
+import { P } from '@/lib/permissions';
 
 /**
  * The school workspace shell.
@@ -47,6 +48,18 @@ export default async function SchoolLayout({
                   Academic calendar
                 </Link>
               </li>
+              {session.permissions.has(P.STUDENT_READ) && (
+                <li>
+                  <Link
+                    href="/students"
+                    className="rounded-[var(--radius-control)] px-2.5 py-1.5
+                               text-[var(--color-ink-muted)] hover:bg-[var(--color-surface-sunken)]
+                               hover:text-[var(--color-ink)]"
+                  >
+                    Students
+                  </Link>
+                </li>
+              )}
             </ul>
           </nav>
 

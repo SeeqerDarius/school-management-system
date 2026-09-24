@@ -84,6 +84,10 @@ model Tenant {
   auditLogs         AuditLog[]
   securityEvents    SecurityEvent[]
   referenceSequences ReferenceSequence[]
+  students          Student[]
+  guardians         Guardian[]
+  guardianRelationships GuardianRelationship[]
+  enrolments        Enrolment[]
 
   @@index([status])
   @@map("tenant")
@@ -431,7 +435,10 @@ model Campus {
 
   tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   memberships Membership[]
+  students    Student[]
+  enrolments  Enrolment[]
 
+  @@unique([id, tenantId])
   @@unique([tenantId, code])
   @@index([tenantId, status])
   @@map("campus")
@@ -492,7 +499,9 @@ model AcademicYear {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   terms  Term[]
+  enrolments Enrolment[]
 
+  @@unique([id, tenantId])
   @@unique([tenantId, code])
   @@index([tenantId, status])
   @@map("academic_year")
@@ -521,10 +530,255 @@ model Term {
   updatedAt DateTime @updatedAt
 
   tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  academicYear AcademicYear @relation(fields: [academicYearId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [academicYearId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  enrolments   Enrolment[]
 
+  @@unique([id, tenantId])
   @@unique([academicYearId, sequence])
   @@unique([academicYearId, code])
   @@index([tenantId, status])
   @@map("term")
+}
+
+// =====================================================================================
+// Students and guardians
+//
+// A student belongs to one school (tenant). A guardian may have children at multiple schools,
+// which is why guardians are separate from students and linked through relationships.
+// =====================================================================================
+
+enum StudentStatus {
+  PROSPECTIVE
+  ENROLLED
+  ACTIVE
+  SUSPENDED
+  WITHDRAWN
+  GRADUATED
+  DECEASED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+model Student {
+  id       String        @id @default(uuid(7)) @db.Uuid
+  tenantId String        @db.Uuid
+  /// Human-facing reference: STU-2026-000123
+  reference String       @unique
+  campusId String        @db.Uuid
+
+  /// Personal information
+  firstName      String
+  lastName       String
+  preferredName  String?
+  dateOfBirth    DateTime      @db.Date
+  gender         Gender
+  nationality    String?       @db.Char(2)
+  /// Ghana-specific: Primary school leaving exam results
+  beceRawScore   Int?
+  beceAggregate  Int?
+  beceYear       Int?
+
+  /// Contact information
+  phoneE164      String?
+  email          String?
+  addressLine1   String?
+  addressLine2   String?
+  city           String?
+  region         String?
+  postalCode     String?
+
+  /// Medical and special needs
+  bloodType      String?
+  medicalNotes   String?
+  allergies      String?
+  specialNeeds   String?
+
+  /// Academic information
+  admissionDate  DateTime?     @db.Date
+  admissionNumber String?
+  previousSchool String?
+
+  /// Status tracking
+  status         StudentStatus @default(PROSPECTIVE)
+  enrollmentDate DateTime?     @db.Date
+  withdrawalDate DateTime?     @db.Date
+  withdrawalReason String?
+  graduationDate DateTime?     @db.Date
+
+  /// System fields
+  photoPath      String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  tenant   Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  campus   Campus               @relation(fields: [campusId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  guardianships GuardianRelationship[]
+  enrollments Enrolment[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, reference])
+  @@index([tenantId, status])
+  @@index([campusId, status])
+  @@index([lastName, firstName])
+  @@map("student")
+}
+
+enum GuardianRelationshipType {
+  FATHER
+  MOTHER
+  GRANDFATHER
+  GRANDMOTHER
+  UNCLE
+  AUNT
+  LEGAL_GUARDIAN
+  SPONSOR
+  OTHER
+}
+
+model Guardian {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+
+  /// Personal information
+  firstName     String
+  lastName      String
+  preferredName String?
+  dateOfBirth   DateTime?     @db.Date
+  gender        Gender?
+  nationality   String?       @db.Char(2)
+
+  /// Contact information
+  phoneE164     String
+  phoneE1642    String?       // Alternate phone
+  email         String?
+  addressLine1  String?
+  addressLine2  String?
+  city          String?
+  region        String?
+  postalCode    String?
+
+  /// Occupation and employment
+  occupation    String?
+  employer      String?
+  workPhone     String?
+
+  /// Identification
+  nationalId    String?       // Ghana Card or other national ID
+  nationalIdType String?      // GHANA_CARD, PASSPORT, etc.
+
+  /// System fields
+  photoPath     String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  tenant      Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  relationships GuardianRelationship[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, lastName, firstName])
+  @@map("guardian")
+}
+
+model GuardianRelationship {
+  id         String                    @id @default(uuid(7)) @db.Uuid
+  tenantId   String                    @db.Uuid
+  studentId  String                    @db.Uuid
+  guardianId String                    @db.Uuid
+
+  relationshipType GuardianRelationshipType
+  isPrimary         Boolean             @default(false)
+  isEmergency       Boolean             @default(false)
+  canPickUp         Boolean             @default(true)
+
+  /// Financial responsibility
+  paysFees          Boolean             @default(false)
+  feePercentage     Int?                // Percentage of fees this guardian pays
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  student  Student   @relation(fields: [studentId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  guardian Guardian  @relation(fields: [guardianId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@unique([studentId, guardianId])
+  @@index([tenantId, studentId])
+  @@index([tenantId, guardianId])
+  @@map("guardian_relationship")
+}
+
+// =====================================================================================
+// Enrolment
+//
+// Links students to academic years and terms. A student may be enrolled in multiple
+// terms across years (e.g., continuing education). The enrolment carries the student's
+// class assignment and academic standing for that term.
+// =====================================================================================
+
+enum EnrolmentStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  WITHDRAWN
+  SUSPENDED
+}
+
+model Enrolment {
+  id             String          @id @default(uuid(7)) @db.Uuid
+  tenantId       String          @db.Uuid
+  studentId      String          @db.Uuid
+  academicYearId String          @db.Uuid
+  termId         String          @db.Uuid
+  campusId       String          @db.Uuid
+
+  /// Class assignment
+  classId        String?         @db.Uuid
+  gradeLevel     String?         // JHS1, JHS2, JHS3, SHS1, etc.
+  section        String?         // A, B, C, etc.
+
+  /// Academic standing
+  status         EnrolmentStatus @default(PENDING)
+  enrolmentDate  DateTime        @db.Date
+  completionDate DateTime?       @db.Date
+
+  /// Academic performance
+  gpa            Decimal?        @db.Decimal(4, 2)
+  classRank      Int?
+  totalStudents  Int?
+
+  /// Attendance summary
+  daysPresent    Int?
+  daysAbsent     Int?
+  daysLate       Int?
+
+  /// Fees and financials
+  feesOwed       Decimal?        @db.Decimal(19, 4)
+  feesPaid       Decimal?        @db.Decimal(19, 4)
+  currency       String          @default("GHS") @db.Char(3)
+
+  /// Notes
+  remarks        String?
+
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  student      Student      @relation(fields: [studentId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [academicYearId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  term         Term         @relation(fields: [termId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  campus       Campus       @relation(fields: [campusId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([studentId, termId])
+  @@index([tenantId, academicYearId, termId])
+  @@index([tenantId, studentId])
+  @@index([tenantId, classId])
+  @@index([tenantId, status])
+  @@map("enrolment")
 }

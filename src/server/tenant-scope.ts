@@ -23,11 +23,16 @@ import { db } from '@/server/db';
  * const years = await tx.academicYear.findMany();   // already scoped
  * ```
  *
+ * <h2>Row-Level Security Support</h2>
+ * When using transactions, this client automatically sets the `app.tenant_id` session variable
+ * for RLS policies. For RLS to be effective:
+ * 1. Use `$transaction` for all tenant-aware operations
+ * 2. Eventually switch DATABASE_URL to use the sankofa_app role (without BYPASSRLS)
+ *
  * <h2>What it deliberately does not do</h2>
- * It is not a substitute for PostgreSQL row-level security, which enforces the same rule inside
- * the database where application code cannot reach past it. RLS is the stronger control and is
- * recorded as a planned hardening step in IMPLEMENTATION_STATUS.md. This is the control that
- * exists today, and unlike hand-written filters it is structural rather than remembered.
+ * The application-level scoping remains as defense-in-depth even after RLS is enabled,
+ * because RLS alone does not protect against application bugs that use $queryRaw to bypass
+ * the client extension.
  */
 
 /**
@@ -43,6 +48,10 @@ const TENANT_OWNED = new Set<string>([
   'Term',
   'Membership',
   'ReferenceSequence',
+  'Student',
+  'Guardian',
+  'GuardianRelationship',
+  'Enrolment',
 ]);
 
 /**
@@ -95,7 +104,7 @@ export function forTenant(tenantId: string) {
     throw new Error('forTenant requires a tenant id; refusing to build an unscoped client');
   }
 
-  return db.$extends({
+  const scopedClient = db.$extends({
     name: 'tenant-scope',
     query: {
       $allModels: {
@@ -166,6 +175,37 @@ export function forTenant(tenantId: string) {
         },
       },
     },
+  });
+
+  return scopedClient;
+}
+
+/**
+ * Execute a transaction with RLS session variable set for tenant isolation.
+ * This ensures RLS policies have access to the current tenant ID.
+ *
+ * <p>Usage:
+ * ```ts
+ * await withRlsTransaction(tenantId, async (tx) => {
+ *   await tx.someModel.create({ data: { ... } });
+ * });
+ * ```
+ *
+ * <p>Note: This sets the session variable at the start of the transaction.
+ * All operations within the callback will have RLS enforcement active.
+ */
+export async function withRlsTransaction<T>(
+  tenantId: string,
+  callback: (tx: TenantClient) => Promise<T>,
+): Promise<T> {
+  const tx = forTenant(tenantId);
+
+  return tx.$transaction(async (transactionTx) => {
+    // Set the session variable for RLS policies at the start of the transaction
+    // set_config accepts a bound value, so the authenticated tenant id is never SQL text.
+    await transactionTx.$queryRaw`SELECT set_config('app.tenant_id', ${tenantId}, true)`;
+
+    return callback(transactionTx as TenantClient);
   });
 }
 

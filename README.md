@@ -4,8 +4,10 @@ A multi-tenant School Management System and School ERP — student information, 
 admissions, attendance, fees, double-entry accounting, HR and payroll, for Ghanaian schools and
 architected so that Ghana is the first optimized configuration rather than the only supported one.
 
-> **Current state:** foundation. Tenancy, identity, authorization, the academic calendar and
-> sign-in are built and tested; the business modules are not.
+> **Current state:** foundation plus an in-progress student-information tranche. Tenancy, identity,
+> authorization, the academic calendar and sign-in are built and tested. Student admission, a
+> paginated list and profile view are under development; guardians, enrolment workflows and the
+> wider business modules are not complete.
 > [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) is the honest record of exactly what
 > exists — read it before assuming a feature is present.
 
@@ -57,11 +59,11 @@ Two tests hold that in place, and both are release gates:
   attacker would: can I read their row knowing its id, change it, delete it, write into their
   school by claiming to be them.
 
-Row-level security **is** on every table — but as a deny-all wall around Supabase's Data API, not
-as tenant isolation. Prisma connects as `postgres`, which has `BYPASSRLS`, so those policies are
-skipped for the application's own queries. Do not read "RLS is on" as "the database enforces
-tenancy": that needs per-tenant policies *and* a non-bypassing role, in that order, and it is the
-top item in [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md).
+Row-level security **is** on every table — but its applied policies are a deny-all wall around
+Supabase's Data API, not tenant isolation. A separate tenant-policy migration is drafted but not
+applied. Prisma still connects as `postgres`, which has `BYPASSRLS`, so those policies would not
+yet enforce tenancy for application queries. See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md)
+for the remaining cutover gates.
 
 ---
 

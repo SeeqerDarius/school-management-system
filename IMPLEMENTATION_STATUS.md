@@ -12,8 +12,8 @@
 ## The short version
 
 The foundation is built and tested: tenancy, identity, authorization, the academic calendar, and
-sign-in. The business modules — students, admissions, attendance, fees, accounting, HR, payroll —
-are **not built**. The schema does not yet contain them.
+sign-in. Student, guardian and enrolment schemas plus a first student workflow are in progress and
+not yet released. Attendance, fees, accounting, HR and payroll are not built.
 
 One known weakness matters more than the rest and is at the top of the list below.
 
@@ -37,7 +37,12 @@ One known weakness matters more than the rest and is at the top of the list belo
 
 ## Known weaknesses
 
-### 1. Row-level security does not enforce tenancy — **highest priority**
+### 1. Row-level security does not enforce tenancy — **highest priority** - IN PROGRESS
+
+**Status:** Migration drafted (`20260920000000_rls_tenant_isolation`) but not yet applied or
+validated against a disposable PostgreSQL database. Its `sankofa_app` role is created without
+login; an operator must provision login and a strong password through the deployment secret
+manager before the application can connect as that role.
 
 RLS *is* enabled on every table as of migration `20260919092000_data_api_lockdown`, with no
 policies, which closes Supabase's Data API. That is worth having and it is **not** tenant
@@ -49,35 +54,26 @@ application's own connection, so tenant isolation still rests entirely on the cl
 The previous Java implementation had real RLS with a non-superuser role and proved it in tests.
 That was lost in the stack change and is not being presented as anything else. See ADR 0010.
 
-**The ordering is load-bearing.** Writing per-tenant policies and switching the connection role are
-one change, not two, and the policies must land first. A non-bypassing role pointed at today's
-policy-less tables makes every query in the product return nothing.
+**Progress:**
+- ⏳ Drafted migration with per-tenant RLS policies for all tenant-owned tables
+- ⏳ Drafted sankofa_app role without BYPASSRLS or an embedded password
+- ⏳ Added withRlsTransaction helper using a bound tenant value for the session variable
+- ⏳ Drafted RLS test suite; database execution remains outstanding
+- ⏳ Migration needs to be applied (requires local PostgreSQL for development)
+- ⏳ DATABASE_URL needs to switch to sankofa_app role
+- ⏳ Existing queries need to move into transactions for session variable support
 
-*What it takes, in order:*
+**What remains:**
 
-1. Per-tenant policies on `campus`, `academic_year`, `term`, `membership`,
-   `reference_sequence`, `branding`; nullable-tenant handling for `audit_log` and
-   `security_event`; and read-shared-but-not-writable handling for `role`, whose NULL `tenantId`
-   means "every school may use this template".
-2. `SET LOCAL app.tenant_id` issued inside every `$transaction`, with policies reading
-   `current_setting('app.tenant_id')`. The raising form fails closed when the variable is unset,
-   which is what we want. Queries made outside a transaction have no session variable, so a good
-   deal of `data.ts` has to move inside one — that cost is the main reason this is staged.
-3. A dedicated login role without `BYPASSRLS`:
+1. Apply the migration: `npm run db:deploy` (after testing locally)
+2. Update DATABASE_URL to use sankofa_app role instead of postgres
+3. Set secure password for sankofa_app role in production
+4. Convert existing data.ts reads to use transactions where needed
+5. Verify RLS enforcement in production environment
 
-   ```sql
-   create role sankofa_app with login password '...'
-     nosuperuser nocreatedb nocreaterole noreplication nobypassrls;
-   grant usage on schema public to sankofa_app;
-   -- then DATABASE_URL becomes sankofa_app.<project-ref>@...
-   ```
-
-   Supabase's own Prisma guide tells you to create this role `with ... bypassrls`. Following it
-   would reintroduce exactly the hole this step exists to close.
-4. A test that fails when the policies are inert. Enabling RLS and then connecting as a bypassing
-   role is the classic way to ship "RLS" that does nothing, and a catalog check for
-   `relrowsecurity` will not catch it — the assertion has to be that a query *returns nothing*
-   when the tenant variable is unset.
+The migration is a draft, not ready to apply: validate it on a disposable database, finish the
+transaction coverage, then provision the login role from the deployment secret manager. Keep
+application-level scoping in `tenant-scope.ts` as defense-in-depth after RLS is enabled.
 
 ### 2. No sign-in throttling
 
@@ -142,7 +138,7 @@ invariants are now held by review and by the tests named above.
 
 The whole product, essentially. Listed so nobody has to guess.
 
-- Students, guardians, enrolment, admissions
+- Students, guardians, enrolment and admissions (in progress: schema, student list, admission and profile views; guardian and enrolment workflows remain incomplete)
 - Classes, subjects, timetable
 - Attendance
 - Assessment, grading, report cards
@@ -173,6 +169,8 @@ exists.
 | `tests/db/tenant-isolation.test.ts` | `npm run test:db` | Cross-tenant read, update, delete and write-by-claim all fail, against real PostgreSQL |
 | `tests/db/calendar-constraints.test.ts` | `npm run test:db` | The database, not the application, refuses overlapping and backwards periods |
 | `tests/db/data-api-lockdown.test.ts` | `npm run test:db` | No table lacks RLS; the Data API roles hold nothing; btree_gist is out of `public` |
+| `tests/db/rls-tenant-isolation.test.ts` | `npm run test:db` | Tenant policies deny unscoped reads, isolate School A from B, and reject cross-school student-campus links |
+| `tests/db/rls-tenant-isolation.test.ts` | `npm run test:db` | Tenant policies deny unscoped reads, isolate School A from B, and reject cross-school student-campus links |
 
 **Not tested yet:** the sign-in path end to end, the calendar actions against a database, session
 revocation, permission resolution with DENY grants. Those need either a database fixture with

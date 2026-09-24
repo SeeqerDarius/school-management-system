@@ -71,10 +71,12 @@ than letting it run unscoped. The tenant is resolved from the authenticated prin
 > queries. Tenant isolation therefore still rests entirely on the client extension, which lives in
 > the application: a `$queryRaw` bypasses it.
 >
-> Do not read "RLS is on" as "the database enforces tenancy". Making it so means per-tenant
-> policies *plus* a connection role without `BYPASSRLS`, in that order — point a non-bypassing role
-> at today's policy-less tables and every query in the product returns nothing. It is the top item
-> in [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md).
+> A tenant-policy migration and a `withRlsTransaction` helper are drafted, but the migration has
+> not been validated or applied and the app still connects as `postgres`. The helper binds
+> `app.tenant_id` with `set_config` inside a transaction. Do not point `DATABASE_URL` at a
+> non-bypassing role yet: authentication and existing calendar reads still have paths that do not
+> establish that variable. The remaining cutover gates are tracked in
+> [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md).
 >
 > Until it lands the guards are `src/server/tenantScopeCoverage.test.ts`, which fails the build if
 > a model gains a `tenantId` and is not scoped, and `tests/db/tenant-isolation.test.ts`, which
