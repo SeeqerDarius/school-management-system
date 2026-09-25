@@ -233,7 +233,9 @@ jobs:
           echo "Migration changes are additive only."
 
   # ---------------------------------------------------------------------------------
-  # Dependency vulnerabilities.
+  # Dependency vulnerabilities. GitHub's dependency-review action requires GitHub Advanced
+  # Security on private repositories. `npm audit` checks the complete locked dependency tree
+  # without that plan requirement.
   # ---------------------------------------------------------------------------------
   dependency-review:
     name: Dependency review
@@ -241,10 +243,13 @@ jobs:
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/setup-node@v4
         with:
-          fail-on-severity: high
-          comment-summary-in-pr: on-failure
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check for high or critical dependency vulnerabilities
+        run: npm audit --audit-level=high
