@@ -159,6 +159,7 @@ set the five environment variables, and push. There is one deployable unit.
 | --- | --- |
 | [AGENTS.md](AGENTS.md) | The rules for changing this code. Read before writing any |
 | [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) | What exists, what does not, what is known to be weak |
+| [BUILD_AND_RELEASE_PLAN.md](docs/BUILD_AND_RELEASE_PLAN.md) | Firebase-free stages and release checks for completing the whole platform |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Structure and the load-bearing invariants |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Getting it to production and back out again |
 | [docs/TESTING.md](docs/TESTING.md) | What is tested, how, and what a gate actually gates |
