@@ -135,7 +135,7 @@ CREATE TABLE "enrolment" (
 );
 
 -- Create indexes
-CREATE UNIQUE INDEX "student_reference_key" ON "student"("reference");
+CREATE UNIQUE INDEX "student_tenantId_reference_key" ON "student"("tenantId", "reference");
 CREATE INDEX "student_tenantId_status_idx" ON "student"("tenantId", "status");
 CREATE INDEX "student_campusId_status_idx" ON "student"("campusId", "status");
 CREATE INDEX "student_lastName_firstName_idx" ON "student"("lastName", "firstName");
@@ -145,10 +145,12 @@ CREATE INDEX "guardian_tenantId_lastName_firstName_idx" ON "guardian"("tenantId"
 CREATE UNIQUE INDEX "guardian_id_tenantId_key" ON "guardian"("id", "tenantId");
 
 CREATE UNIQUE INDEX "guardian_relationship_studentId_guardianId_key" ON "guardian_relationship"("studentId", "guardianId");
+CREATE UNIQUE INDEX "guardian_relationship_id_tenantId_key" ON "guardian_relationship"("id", "tenantId");
 CREATE INDEX "guardian_relationship_tenantId_studentId_idx" ON "guardian_relationship"("tenantId", "studentId");
 CREATE INDEX "guardian_relationship_tenantId_guardianId_idx" ON "guardian_relationship"("tenantId", "guardianId");
 
 CREATE UNIQUE INDEX "enrolment_studentId_termId_key" ON "enrolment"("studentId", "termId");
+CREATE UNIQUE INDEX "enrolment_id_tenantId_key" ON "enrolment"("id", "tenantId");
 CREATE INDEX "enrolment_tenantId_academicYearId_termId_idx" ON "enrolment"("tenantId", "academicYearId", "termId");
 CREATE INDEX "enrolment_tenantId_studentId_idx" ON "enrolment"("tenantId", "studentId");
 CREATE INDEX "enrolment_tenantId_classId_idx" ON "enrolment"("tenantId", "classId");
