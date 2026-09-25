@@ -84,7 +84,7 @@ describe('RLS tenant isolation', () => {
         SELECT policyname
         FROM pg_policies
         WHERE tablename = ${table}
-        AND policyname LIKE '${table}_%'`;
+        AND policyname LIKE ${`${table}_%`}`;
 
       expect(policies.length).toBeGreaterThan(0);
     }
