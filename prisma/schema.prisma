@@ -568,7 +568,7 @@ model Student {
   id       String        @id @default(uuid(7)) @db.Uuid
   tenantId String        @db.Uuid
   /// Human-facing reference: STU-2026-000123
-  reference String       @unique
+  reference String
   campusId String        @db.Uuid
 
   /// Personal information
