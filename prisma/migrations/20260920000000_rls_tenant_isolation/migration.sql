@@ -106,160 +106,160 @@ DROP POLICY IF EXISTS role_delete ON role;
 CREATE POLICY tenant_isolation_select ON campus
   FOR SELECT
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_insert ON campus
   FOR INSERT
   TO sankofa_app
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_update ON campus
   FOR UPDATE
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_delete ON campus
   FOR DELETE
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 -- Academic Year policies
 CREATE POLICY tenant_isolation_select ON academic_year
   FOR SELECT
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_insert ON academic_year
   FOR INSERT
   TO sankofa_app
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_update ON academic_year
   FOR UPDATE
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_delete ON academic_year
   FOR DELETE
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 -- Term policies
 CREATE POLICY tenant_isolation_select ON term
   FOR SELECT
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_insert ON term
   FOR INSERT
   TO sankofa_app
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_update ON term
   FOR UPDATE
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_delete ON term
   FOR DELETE
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 -- Membership policies
 CREATE POLICY tenant_isolation_select ON membership
   FOR SELECT
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_insert ON membership
   FOR INSERT
   TO sankofa_app
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_update ON membership
   FOR UPDATE
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_delete ON membership
   FOR DELETE
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 -- Reference Sequence policies
 CREATE POLICY tenant_isolation_select ON reference_sequence
   FOR SELECT
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_insert ON reference_sequence
   FOR INSERT
   TO sankofa_app
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_update ON reference_sequence
   FOR UPDATE
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_delete ON reference_sequence
   FOR DELETE
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 -- Branding policies (tenant-keyed table)
 CREATE POLICY tenant_isolation_select ON branding
   FOR SELECT
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_insert ON branding
   FOR INSERT
   TO sankofa_app
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_update ON branding
   FOR UPDATE
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY tenant_isolation_delete ON branding
   FOR DELETE
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 -- -------------------------------------------------------------------------------------
 -- 5. Create policies for nullable-tenant tables
--- These tables may have platform rows (tenant_id IS NULL) that should be readable
+-- These tables may have platform rows ("tenantId" IS NULL) that should be readable
 -- -------------------------------------------------------------------------------------
 
 -- Audit Log policies
 CREATE POLICY audit_log_select ON audit_log
   FOR SELECT
   TO sankofa_app
-  USING (tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" IS NULL OR "tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY audit_log_insert ON audit_log
   FOR INSERT
   TO sankofa_app
-  WITH CHECK (tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+  WITH CHECK ("tenantId" IS NULL OR "tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 -- Security Event policies
 CREATE POLICY security_event_select ON security_event
   FOR SELECT
   TO sankofa_app
-  USING (tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" IS NULL OR "tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY security_event_insert ON security_event
   FOR INSERT
   TO sankofa_app
-  WITH CHECK (tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+  WITH CHECK ("tenantId" IS NULL OR "tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 -- -------------------------------------------------------------------------------------
 -- 6. Create policies for shared-read tables (role)
@@ -271,23 +271,23 @@ CREATE POLICY security_event_insert ON security_event
 CREATE POLICY role_select ON role
   FOR SELECT
   TO sankofa_app
-  USING (tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" IS NULL OR "tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY role_insert ON role
   FOR INSERT
   TO sankofa_app
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY role_update ON role
   FOR UPDATE
   TO sankofa_app
-  USING (tenant_id IS NULL OR tenant_id = current_setting('app.tenant_id', true)::uuid)
-  WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" IS NULL OR "tenantId" = current_setting('app.tenant_id', true)::uuid)
+  WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 CREATE POLICY role_delete ON role
   FOR DELETE
   TO sankofa_app
-  USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+  USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
 -- -------------------------------------------------------------------------------------
 -- 7. Create platform admin policies (optional, for future use)

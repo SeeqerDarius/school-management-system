@@ -203,74 +203,74 @@ BEGIN
   -- Student policies
   CREATE POLICY tenant_isolation_select ON student
     FOR SELECT TO sankofa_app
-    USING (tenantId = current_setting('app.tenant_id', true)::uuid);
+    USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   CREATE POLICY tenant_isolation_insert ON student
     FOR INSERT TO sankofa_app
-    WITH CHECK (tenantId = current_setting('app.tenant_id', true)::uuid);
+    WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   CREATE POLICY tenant_isolation_update ON student
     FOR UPDATE TO sankofa_app
-    USING (tenantId = current_setting('app.tenant_id', true)::uuid)
-    WITH CHECK (tenantId = current_setting('app.tenant_id', true)::uuid);
+    USING ("tenantId" = current_setting('app.tenant_id', true)::uuid)
+    WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   CREATE POLICY tenant_isolation_delete ON student
     FOR DELETE TO sankofa_app
-    USING (tenantId = current_setting('app.tenant_id', true)::uuid);
+    USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   -- Guardian policies
   CREATE POLICY tenant_isolation_select ON guardian
     FOR SELECT TO sankofa_app
-    USING (tenantId = current_setting('app.tenant_id', true)::uuid);
+    USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   CREATE POLICY tenant_isolation_insert ON guardian
     FOR INSERT TO sankofa_app
-    WITH CHECK (tenantId = current_setting('app.tenant_id', true)::uuid);
+    WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   CREATE POLICY tenant_isolation_update ON guardian
     FOR UPDATE TO sankofa_app
-    USING (tenantId = current_setting('app.tenant_id', true)::uuid)
-    WITH CHECK (tenantId = current_setting('app.tenant_id', true)::uuid);
+    USING ("tenantId" = current_setting('app.tenant_id', true)::uuid)
+    WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   CREATE POLICY tenant_isolation_delete ON guardian
     FOR DELETE TO sankofa_app
-    USING (tenantId = current_setting('app.tenant_id', true)::uuid);
+    USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   -- GuardianRelationship policies
   CREATE POLICY tenant_isolation_select ON guardian_relationship
     FOR SELECT TO sankofa_app
-    USING (tenantId = current_setting('app.tenant_id', true)::uuid);
+    USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   CREATE POLICY tenant_isolation_insert ON guardian_relationship
     FOR INSERT TO sankofa_app
-    WITH CHECK (tenantId = current_setting('app.tenant_id', true)::uuid);
+    WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   CREATE POLICY tenant_isolation_update ON guardian_relationship
     FOR UPDATE TO sankofa_app
-    USING (tenantId = current_setting('app.tenant_id', true)::uuid)
-    WITH CHECK (tenantId = current_setting('app.tenant_id', true)::uuid);
+    USING ("tenantId" = current_setting('app.tenant_id', true)::uuid)
+    WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   CREATE POLICY tenant_isolation_delete ON guardian_relationship
     FOR DELETE TO sankofa_app
-    USING (tenantId = current_setting('app.tenant_id', true)::uuid);
+    USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   -- Enrolment policies
   CREATE POLICY tenant_isolation_select ON enrolment
     FOR SELECT TO sankofa_app
-    USING (tenantId = current_setting('app.tenant_id', true)::uuid);
+    USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   CREATE POLICY tenant_isolation_insert ON enrolment
     FOR INSERT TO sankofa_app
-    WITH CHECK (tenantId = current_setting('app.tenant_id', true)::uuid);
+    WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   CREATE POLICY tenant_isolation_update ON enrolment
     FOR UPDATE TO sankofa_app
-    USING (tenantId = current_setting('app.tenant_id', true)::uuid)
-    WITH CHECK (tenantId = current_setting('app.tenant_id', true)::uuid);
+    USING ("tenantId" = current_setting('app.tenant_id', true)::uuid)
+    WITH CHECK ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   CREATE POLICY tenant_isolation_delete ON enrolment
     FOR DELETE TO sankofa_app
-    USING (tenantId = current_setting('app.tenant_id', true)::uuid);
+    USING ("tenantId" = current_setting('app.tenant_id', true)::uuid);
 
   -- Grant privileges to sankofa_app
   GRANT SELECT, INSERT, UPDATE, DELETE ON student TO sankofa_app;
