@@ -122,6 +122,54 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public
   GRANT USAGE, SELECT ON SEQUENCES TO sankofa_app;
 
 -- -------------------------------------------------------------------------------------
+-- 2b. Retire the policies this migration supersedes.
+--
+-- `20260920000000_rls_tenant_isolation` wrote a four-policy set per table
+-- (tenant_isolation_select/insert/update/delete) reading current_setting() inline. The
+-- sections below replace those with a single FOR ALL policy per table, reading the `app`
+-- accessors instead.
+--
+-- They are dropped rather than left in place because PERMISSIVE policies are OR'd: leaving
+-- both sets installed makes the effective rule the union of two definitions of the same
+-- thing, and the next person to change one has no way to know the other exists. One policy
+-- set per table, and it is the set tests/db/rls-policies.test.ts asserts against.
+--
+-- Not dropped: student, guardian, guardian_relationship and enrolment keep the policies
+-- `20260920010000_student_guardian_enrolment` gave them. That migration owns those tables
+-- and this one does not redefine them; the coverage test below still requires every table
+-- carrying a tenantId to have a policy, so they remain accounted for.
+--
+-- Idempotent, and safe on a database where the earlier migration never ran.
+-- -------------------------------------------------------------------------------------
+DO $$
+DECLARE
+  t text;
+  verb text;
+BEGIN
+  FOREACH t IN ARRAY ARRAY[
+    'academic_year', 'term', 'campus', 'branding', 'reference_sequence', 'membership'
+  ]
+  LOOP
+    FOREACH verb IN ARRAY ARRAY['select', 'insert', 'update', 'delete']
+    LOOP
+      EXECUTE format('DROP POLICY IF EXISTS tenant_isolation_%s ON public.%I', verb, t);
+    END LOOP;
+  END LOOP;
+END
+$$;
+
+DROP POLICY IF EXISTS role_select ON public.role;
+DROP POLICY IF EXISTS role_insert ON public.role;
+DROP POLICY IF EXISTS role_update ON public.role;
+DROP POLICY IF EXISTS role_delete ON public.role;
+
+DROP POLICY IF EXISTS audit_log_select ON public.audit_log;
+DROP POLICY IF EXISTS audit_log_insert ON public.audit_log;
+
+DROP POLICY IF EXISTS security_event_select ON public.security_event;
+DROP POLICY IF EXISTS security_event_insert ON public.security_event;
+
+-- -------------------------------------------------------------------------------------
 -- 3. Strictly tenant-owned tables.
 --
 -- One school's rows, nothing else, read and write. `tenantId = NULL` is never true, so an

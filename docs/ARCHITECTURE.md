@@ -66,9 +66,11 @@ than letting it run unscoped. The tenant is resolved from the authenticated prin
 **membership**, never from a request header, body, query parameter or subdomain.
 
 The database enforces the same rule underneath, and that is the stronger half. Migration
-`20260921030000_tenant_rls_policies` adds per-tenant policies to every table carrying a
-`tenantId`, and creates `sankofa_app` — a login role declared `NOBYPASSRLS`, so the policies
-actually bind. The policies read `app.tenant_id`, a transaction-local setting bound by
+`20260920000000_rls_tenant_isolation` creates `sankofa_app` — a login role declared
+`NOBYPASSRLS`, so the policies actually bind — and writes the first per-tenant policies;
+`20260921030000_tenant_rls_policies` completes the set, covering `app_user`, `tenant`, the
+permission catalogue and the tables hanging off a membership, and replacing the per-verb
+policies on the tables it takes over so each one has a single definition. The policies read `app.tenant_id`, a transaction-local setting bound by
 `src/server/db-context.ts`; an unbound transaction matches nothing, so forgetting to bind loses
 data rather than leaking it.
 

@@ -17,7 +17,8 @@ sign-in. Student, guardian and enrolment schemas plus a first student workflow a
 not yet released. Attendance, fees, accounting, HR and payroll are not built.
 
 The weakness that mattered most — tenant isolation resting entirely on application code — is
-closed in the codebase as of `20260921030000_tenant_rls_policies`. It is **not** closed in any
+closed in the codebase as of `20260920000000_rls_tenant_isolation` and
+`20260921030000_tenant_rls_policies` together. It is **not** closed in any
 deployment until an operator repoints `DATABASE_URL` at the restricted role — two steps, in
 [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#5-switch-to-the-restricted-database-role).
 
@@ -39,7 +40,7 @@ deployment until an operator repoints `DATABASE_URL` at the restricted role — 
 | Invitations | Issue an invitation (creates the user with no password, the membership as INVITED, and a single-use 256-bit token stored only as a digest), redeem it to set a password and activate the membership. Screens for both. Delivery is by passing the link on — email is not wired | `src/features/people/**`, `src/lib/invitation.ts` |
 | Sign-in throttling | Escalating lockout per account and per client address, counted from `security_event` and checked before the bcrypt compare; a refusal is logged under its own event type so a lock cannot be held open | `src/server/auth/throttle.ts`, `src/lib/sign-in-throttle.ts` |
 | Content-Security-Policy | Per-request nonce with `strict-dynamic`, issued from middleware; `base-uri`, `form-action`, `object-src` and `frame-ancestors` closed | `src/middleware.ts` |
-| Tenant isolation in the database | Per-tenant policies on every table carrying `tenantId`, read by a transaction-bound `app.tenant_id`; a `NOBYPASSRLS` role to connect as. Not live until an operator repoints `DATABASE_URL` | `prisma/migrations/20260921030000_tenant_rls_policies`, `src/server/db-context.ts` |
+| Tenant isolation in the database | Per-tenant policies on every table carrying `tenantId`, read by a transaction-bound `app.tenant_id`; a `NOBYPASSRLS` role to connect as. Not live until an operator repoints `DATABASE_URL` | `prisma/migrations/20260920000000_rls_tenant_isolation`, `prisma/migrations/20260921030000_tenant_rls_policies`, `src/server/db-context.ts` |
 
 ---
 

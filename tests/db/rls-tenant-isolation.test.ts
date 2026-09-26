@@ -62,31 +62,41 @@ describe('RLS tenant isolation', () => {
     expect(role?.rolbypassrls).toBe(false);
   });
 
-  it('tenant-owned tables have RLS policies', async () => {
+  // These two ask whether the table is covered, so they match on what covering MEANS —
+  // a policy that names sankofa_app — rather than on how the policy happens to be called.
+  // They matched `tenant_isolation_%` and `<table>_%` before, which passed only while every
+  // policy followed one migration's naming: 20260921030000_tenant_rls_policies replaces the
+  // per-verb policies on several of these tables with a single FOR ALL policy, and the old
+  // assertion went red without anything being uncovered. A coverage test keyed on a name
+  // fails when a name changes and, worse, passes when a differently-named policy grants far
+  // more than intended.
+  it('tenant-owned tables have RLS policies binding the application role', async () => {
     const tables = ['campus', 'academic_year', 'term', 'membership', 'reference_sequence', 'branding', 'student', 'guardian', 'guardian_relationship', 'enrolment'];
-    
+
     for (const table of tables) {
       const policies = await db.$queryRaw<{ policyname: string }[]>`
         SELECT policyname
         FROM pg_policies
-        WHERE tablename = ${table}
-        AND policyname LIKE 'tenant_isolation_%'`;
+        WHERE schemaname = 'public'
+          AND tablename = ${table}
+          AND 'sankofa_app' = ANY(roles)`;
 
-      expect(policies.length).toBeGreaterThan(0);
+      expect(policies.length, `${table} has no RLS policy naming sankofa_app`).toBeGreaterThan(0);
     }
   });
 
-  it('nullable-tenant tables have appropriate RLS policies', async () => {
+  it('nullable-tenant tables have RLS policies binding the application role', async () => {
     const tables = ['audit_log', 'security_event'];
-    
+
     for (const table of tables) {
       const policies = await db.$queryRaw<{ policyname: string }[]>`
         SELECT policyname
         FROM pg_policies
-        WHERE tablename = ${table}
-        AND policyname LIKE ${`${table}_%`}`;
+        WHERE schemaname = 'public'
+          AND tablename = ${table}
+          AND 'sankofa_app' = ANY(roles)`;
 
-      expect(policies.length).toBeGreaterThan(0);
+      expect(policies.length, `${table} has no RLS policy naming sankofa_app`).toBeGreaterThan(0);
     }
   });
 
@@ -148,9 +158,14 @@ describe('RLS policy permissions', () => {
       SELECT c.relname as tablename, g.grantee::regrole::text as grantee, g.privilege_type
       FROM pg_class c
       JOIN pg_namespace n ON n.oid = c.relnamespace
-      CROSS JOIN LATERAL aclexplode(COALESCE(c.relacl, '{}')) AS g
+      CROSS JOIN LATERAL aclexplode(c.relacl) AS g
       WHERE n.nspname = 'public'
         AND c.relkind IN ('r', 'p')
+        -- A table nobody has been granted anything on has relacl NULL, not an empty ACL,
+        -- and aclexplode rejects the empty array COALESCE would hand it ("ACL arrays must
+        -- be one-dimensional"). _prisma_migrations is exactly that table: the application
+        -- role is deliberately given nothing on the migration ledger.
+        AND c.relacl IS NOT NULL
         AND g.grantee::regrole::text = 'sankofa_app'
       ORDER BY tablename, privilege_type`;
 
