@@ -54,6 +54,7 @@ const TENANT_OWNED = new Set<string>([
   'Guardian',
   'GuardianRelationship',
   'Enrolment',
+  'ClassGroup',
 ]);
 
 /**

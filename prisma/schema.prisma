@@ -50,13 +50,13 @@ enum OnboardingState {
 
 /// One subscribing school organisation. The unit of data isolation.
 model Tenant {
-  id     String       @id @default(uuid(7)) @db.Uuid
+  id          String       @id @default(uuid(7)) @db.Uuid
   /// Subdomain label. A routing hint for the UI only — never the authorization decision.
-  slug   String       @unique
+  slug        String       @unique
   legalName   String
   displayName String
   shortName   String?
-  status      TenantStatus    @default(PROVISIONING)
+  status      TenantStatus @default(PROVISIONING)
 
   // Localisation defaults. Ghana is the first optimized configuration, not the only
   // supported one — these are data, never assumptions baked into code.
@@ -75,19 +75,21 @@ model Tenant {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  memberships       Membership[]
-  roles             Role[]
-  campuses          Campus[]
-  academicYears     AcademicYear[]
-  terms             Term[]
-  branding          Branding?
-  auditLogs         AuditLog[]
-  securityEvents    SecurityEvent[]
-  referenceSequences ReferenceSequence[]
-  students          Student[]
-  guardians         Guardian[]
+  memberships           Membership[]
+  roles                 Role[]
+  campuses              Campus[]
+  academicYears         AcademicYear[]
+  terms                 Term[]
+  branding              Branding?
+  auditLogs             AuditLog[]
+  securityEvents        SecurityEvent[]
+  referenceSequences    ReferenceSequence[]
+  students              Student[]
+  guardians             Guardian[]
   guardianRelationships GuardianRelationship[]
-  enrolments        Enrolment[]
+  enrolments            Enrolment[]
+
+  classGroups ClassGroup[]
 
   @@index([status])
   @@map("tenant")
@@ -96,12 +98,12 @@ model Tenant {
 /// Concurrency-safe numbering for human-facing references: STU-2026-000123, REC-2026-000932.
 /// Allocation takes a row lock so two cashiers cannot mint the same receipt number.
 model ReferenceSequence {
-  tenantId  String @db.Uuid
+  tenantId  String   @db.Uuid
   scope     String
-  periodKey String @default("")
-  prefix    String @default("")
-  padWidth  Int    @default(6)
-  nextValue BigInt @default(1)
+  periodKey String   @default("")
+  prefix    String   @default("")
+  padWidth  Int      @default(6)
+  nextValue BigInt   @default(1)
   updatedAt DateTime @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -129,8 +131,8 @@ enum UserStatus {
 /// One row per human, platform-wide. A parent with children at two subscribing schools is
 /// ONE user with TWO memberships.
 model AppUser {
-  id    String @id @default(uuid(7)) @db.Uuid
-  email String @unique
+  id            String  @id @default(uuid(7)) @db.Uuid
+  email         String  @unique
   emailVerified Boolean @default(false)
 
   /// bcrypt. Null until an invited user sets their password.
@@ -143,13 +145,13 @@ model AppUser {
   locale        String?
   timezone      String?
 
-  status       UserStatus @default(PENDING_INVITE)
-  mfaEnrolled  Boolean    @default(false)
-  mfaRequired  Boolean    @default(false)
+  status      UserStatus @default(PENDING_INVITE)
+  mfaEnrolled Boolean    @default(false)
+  mfaRequired Boolean    @default(false)
 
   /// Any session issued before this instant is rejected, so a compromised account can be
   /// cut off without waiting for a token to expire.
-  sessionsValidFrom DateTime @default(now())
+  sessionsValidFrom DateTime  @default(now())
   lastLoginAt       DateTime?
 
   /// Single-use, hashed. Set when a school invites someone or a password reset is requested.
@@ -169,14 +171,14 @@ model AppUser {
 
 /// The global catalogue of granular capabilities. The only unit an access check consults.
 model Permission {
-  id          String  @id @default(uuid(7)) @db.Uuid
+  id               String  @id @default(uuid(7)) @db.Uuid
   /// MODULE_NOUN_VERB. Stable forever — a mistake is corrected by adding the right code
   /// and deprecating the wrong one, never by editing in place.
-  code        String  @unique
-  module      String
-  description String
+  code             String  @unique
+  module           String
+  description      String
   /// Must be assigned individually, never swept in by a "grant the whole module" convenience.
-  isSensitive Boolean @default(false)
+  isSensitive      Boolean @default(false)
   /// Touches a child's health, discipline, counselling record or whereabouts.
   isChildSensitive Boolean @default(false)
 
@@ -195,29 +197,29 @@ enum RoleScope {
 /// A named bundle of permissions. `tenantId == null` marks a system template every tenant
 /// may use; a tenant may also define its own.
 model Role {
-  id          String    @id @default(uuid(7)) @db.Uuid
-  tenantId    String?   @db.Uuid
-  code        String
-  name        String
-  description String?
-  scope       RoleScope @default(SCHOOL)
-  isSystem    Boolean   @default(false)
-  isAssignable Boolean  @default(true)
+  id           String    @id @default(uuid(7)) @db.Uuid
+  tenantId     String?   @db.Uuid
+  code         String
+  name         String
+  description  String?
+  scope        RoleScope @default(SCHOOL)
+  isSystem     Boolean   @default(false)
+  isAssignable Boolean   @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant          Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  permissions     RolePermission[]
-  memberEntries   MembershipRole[]
+  tenant        Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  permissions   RolePermission[]
+  memberEntries MembershipRole[]
 
   @@unique([tenantId, code])
   @@map("role")
 }
 
 model RolePermission {
-  roleId       String @db.Uuid
-  permissionId String @db.Uuid
+  roleId       String   @db.Uuid
+  permissionId String   @db.Uuid
   grantedAt    DateTime @default(now())
 
   role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
@@ -247,16 +249,16 @@ enum PrincipalType {
 /// User × tenant. The effective tenant of a request is the tenant of the verified
 /// membership — never a subdomain, header or parameter.
 model Membership {
-  id       String @id @default(uuid(7)) @db.Uuid
-  tenantId String @db.Uuid
-  userId   String @db.Uuid
+  id       String  @id @default(uuid(7)) @db.Uuid
+  tenantId String  @db.Uuid
+  userId   String  @db.Uuid
   /// Optional campus restriction for multi-campus tenants. Null means the whole tenant.
   campusId String? @db.Uuid
 
   status        MembershipStatus @default(INVITED)
   principalType PrincipalType
   /// Set once the corresponding domain row exists (staff / student / guardian).
-  principalId   String? @db.Uuid
+  principalId   String?          @db.Uuid
   displayTitle  String?
 
   startedOn    DateTime? @db.Date
@@ -268,15 +270,18 @@ model Membership {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant      Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  user        AppUser                     @relation(fields: [userId], references: [id], onDelete: Restrict)
-  campus      Campus?                     @relation(fields: [campusId], references: [id], onDelete: SetNull)
-  roles       MembershipRole[]
-  grants      MembershipPermissionGrant[]
-  auditLogs   AuditLog[]
+  tenant    Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user      AppUser                     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  campus    Campus?                     @relation(fields: [campusId], references: [id], onDelete: SetNull)
+  roles     MembershipRole[]
+  grants    MembershipPermissionGrant[]
+  auditLogs AuditLog[]
 
   /// A person may be both a member of staff and a parent at the same school, and those are
   /// genuinely different hats.
+  classGroupsTaught ClassGroup[]
+
+  @@unique([id, tenantId])
   @@unique([tenantId, userId, principalType])
   @@index([userId, status])
   @@index([tenantId, status])
@@ -285,8 +290,8 @@ model Membership {
 }
 
 model MembershipRole {
-  membershipId String @db.Uuid
-  roleId       String @db.Uuid
+  membershipId String   @db.Uuid
+  roleId       String   @db.Uuid
   grantedAt    DateTime @default(now())
 
   membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
@@ -358,10 +363,10 @@ model SecurityEvent {
 /// Written in the same transaction as the change it describes, so the two commit or roll
 /// back together. An audit trail that can disagree with its data is not evidence.
 model AuditLog {
-  id                String   @id @default(uuid(7)) @db.Uuid
-  tenantId          String?  @db.Uuid
-  actorUserId       String?  @db.Uuid
-  actorMembershipId String?  @db.Uuid
+  id                String  @id @default(uuid(7)) @db.Uuid
+  tenantId          String? @db.Uuid
+  actorUserId       String? @db.Uuid
+  actorMembershipId String? @db.Uuid
 
   /// MODULE_NOUN_VERB, past tense: ACADEMIC_YEAR_ACTIVATED, GRADE_AMENDED.
   action       String
@@ -438,6 +443,8 @@ model Campus {
   students    Student[]
   enrolments  Enrolment[]
 
+  classGroups ClassGroup[]
+
   @@unique([id, tenantId])
   @@unique([tenantId, code])
   @@index([tenantId, status])
@@ -481,15 +488,15 @@ enum CalendarStatus {
 }
 
 model AcademicYear {
-  id       String         @id @default(uuid(7)) @db.Uuid
-  tenantId String         @db.Uuid
-  code     String
-  name     String
-  startsOn DateTime       @db.Date
-  endsOn   DateTime       @db.Date
-  status   CalendarStatus @default(PLANNED)
+  id        String         @id @default(uuid(7)) @db.Uuid
+  tenantId  String         @db.Uuid
+  code      String
+  name      String
+  startsOn  DateTime       @db.Date
+  endsOn    DateTime       @db.Date
+  status    CalendarStatus @default(PLANNED)
   /// The year new work defaults to. At most one per tenant.
-  isCurrent Boolean       @default(false)
+  isCurrent Boolean        @default(false)
 
   closedAt DateTime?
   closedBy String?   @db.Uuid
@@ -497,9 +504,11 @@ model AcademicYear {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  terms  Term[]
+  tenant     Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  terms      Term[]
   enrolments Enrolment[]
+
+  classGroups ClassGroup[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, code])
@@ -565,60 +574,60 @@ enum Gender {
 }
 
 model Student {
-  id       String        @id @default(uuid(7)) @db.Uuid
-  tenantId String        @db.Uuid
+  id        String @id @default(uuid(7)) @db.Uuid
+  tenantId  String @db.Uuid
   /// Human-facing reference: STU-2026-000123
   reference String
-  campusId String        @db.Uuid
+  campusId  String @db.Uuid
 
   /// Personal information
-  firstName      String
-  lastName       String
-  preferredName  String?
-  dateOfBirth    DateTime      @db.Date
-  gender         Gender
-  nationality    String?       @db.Char(2)
+  firstName     String
+  lastName      String
+  preferredName String?
+  dateOfBirth   DateTime @db.Date
+  gender        Gender
+  nationality   String?  @db.Char(2)
   /// Ghana-specific: Primary school leaving exam results
-  beceRawScore   Int?
-  beceAggregate  Int?
-  beceYear       Int?
+  beceRawScore  Int?
+  beceAggregate Int?
+  beceYear      Int?
 
   /// Contact information
-  phoneE164      String?
-  email          String?
-  addressLine1   String?
-  addressLine2   String?
-  city           String?
-  region         String?
-  postalCode     String?
+  phoneE164    String?
+  email        String?
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  region       String?
+  postalCode   String?
 
   /// Medical and special needs
-  bloodType      String?
-  medicalNotes   String?
-  allergies      String?
-  specialNeeds   String?
+  bloodType    String?
+  medicalNotes String?
+  allergies    String?
+  specialNeeds String?
 
   /// Academic information
-  admissionDate  DateTime?     @db.Date
+  admissionDate   DateTime? @db.Date
   admissionNumber String?
-  previousSchool String?
+  previousSchool  String?
 
   /// Status tracking
-  status         StudentStatus @default(PROSPECTIVE)
-  enrollmentDate DateTime?     @db.Date
-  withdrawalDate DateTime?     @db.Date
+  status           StudentStatus @default(PROSPECTIVE)
+  enrollmentDate   DateTime?     @db.Date
+  withdrawalDate   DateTime?     @db.Date
   withdrawalReason String?
-  graduationDate DateTime?     @db.Date
+  graduationDate   DateTime?     @db.Date
 
   /// System fields
-  photoPath      String?
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  photoPath String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  tenant   Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  campus   Campus               @relation(fields: [campusId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  campus        Campus                 @relation(fields: [campusId, tenantId], references: [id, tenantId], onDelete: Restrict)
   guardianships GuardianRelationship[]
-  enrollments Enrolment[]
+  enrollments   Enrolment[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, reference])
@@ -648,35 +657,35 @@ model Guardian {
   firstName     String
   lastName      String
   preferredName String?
-  dateOfBirth   DateTime?     @db.Date
+  dateOfBirth   DateTime? @db.Date
   gender        Gender?
-  nationality   String?       @db.Char(2)
+  nationality   String?   @db.Char(2)
 
   /// Contact information
-  phoneE164     String
-  phoneE1642    String?       // Alternate phone
-  email         String?
-  addressLine1  String?
-  addressLine2  String?
-  city          String?
-  region        String?
-  postalCode    String?
+  phoneE164    String
+  phoneE1642   String? // Alternate phone
+  email        String?
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  region       String?
+  postalCode   String?
 
   /// Occupation and employment
-  occupation    String?
-  employer      String?
-  workPhone     String?
+  occupation String?
+  employer   String?
+  workPhone  String?
 
   /// Identification
-  nationalId    String?       // Ghana Card or other national ID
-  nationalIdType String?      // GHANA_CARD, PASSPORT, etc.
+  nationalId     String? // Ghana Card or other national ID
+  nationalIdType String? // GHANA_CARD, PASSPORT, etc.
 
   /// System fields
-  photoPath     String?
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
+  photoPath String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
-  tenant      Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   relationships GuardianRelationship[]
 
   @@unique([id, tenantId])
@@ -685,26 +694,33 @@ model Guardian {
 }
 
 model GuardianRelationship {
-  id         String                    @id @default(uuid(7)) @db.Uuid
-  tenantId   String                    @db.Uuid
-  studentId  String                    @db.Uuid
-  guardianId String                    @db.Uuid
+  id         String @id @default(uuid(7)) @db.Uuid
+  tenantId   String @db.Uuid
+  studentId  String @db.Uuid
+  guardianId String @db.Uuid
 
   relationshipType GuardianRelationshipType
-  isPrimary         Boolean             @default(false)
-  isEmergency       Boolean             @default(false)
-  canPickUp         Boolean             @default(true)
+  isPrimary        Boolean                  @default(false)
+  isEmergency      Boolean                  @default(false)
+  canPickUp        Boolean                  @default(true)
 
   /// Financial responsibility
-  paysFees          Boolean             @default(false)
-  feePercentage     Int?                // Percentage of fees this guardian pays
+  paysFees      Boolean @default(false)
+  feePercentage Int? // Percentage of fees this guardian pays
+
+  /// Revocation. §6 calls custody "the case the product most often gets wrong": a link is
+  /// revoked with a recorded reason, never deleted, because who had access and when is
+  /// itself the record a safeguarding review reads back.
+  revokedAt             DateTime?
+  revokedReason         String?
+  revokedByMembershipId String?   @db.Uuid
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  student  Student   @relation(fields: [studentId, tenantId], references: [id, tenantId], onDelete: Cascade)
-  guardian Guardian  @relation(fields: [guardianId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  tenant   Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  student  Student  @relation(fields: [studentId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  guardian Guardian @relation(fields: [guardianId, tenantId], references: [id, tenantId], onDelete: Cascade)
 
   @@unique([id, tenantId])
   @@unique([studentId, guardianId])
@@ -730,17 +746,17 @@ enum EnrolmentStatus {
 }
 
 model Enrolment {
-  id             String          @id @default(uuid(7)) @db.Uuid
-  tenantId       String          @db.Uuid
-  studentId      String          @db.Uuid
-  academicYearId String          @db.Uuid
-  termId         String          @db.Uuid
-  campusId       String          @db.Uuid
+  id             String @id @default(uuid(7)) @db.Uuid
+  tenantId       String @db.Uuid
+  studentId      String @db.Uuid
+  academicYearId String @db.Uuid
+  termId         String @db.Uuid
+  campusId       String @db.Uuid
 
   /// Class assignment
-  classId        String?         @db.Uuid
-  gradeLevel     String?         // JHS1, JHS2, JHS3, SHS1, etc.
-  section        String?         // A, B, C, etc.
+  classId    String? @db.Uuid
+  gradeLevel String? // JHS1, JHS2, JHS3, SHS1, etc.
+  section    String? // A, B, C, etc.
 
   /// Academic standing
   status         EnrolmentStatus @default(PENDING)
@@ -748,31 +764,32 @@ model Enrolment {
   completionDate DateTime?       @db.Date
 
   /// Academic performance
-  gpa            Decimal?        @db.Decimal(4, 2)
-  classRank      Int?
-  totalStudents  Int?
+  gpa           Decimal? @db.Decimal(4, 2)
+  classRank     Int?
+  totalStudents Int?
 
   /// Attendance summary
-  daysPresent    Int?
-  daysAbsent     Int?
-  daysLate       Int?
+  daysPresent Int?
+  daysAbsent  Int?
+  daysLate    Int?
 
   /// Fees and financials
-  feesOwed       Decimal?        @db.Decimal(19, 4)
-  feesPaid       Decimal?        @db.Decimal(19, 4)
-  currency       String          @default("GHS") @db.Char(3)
+  feesOwed Decimal? @db.Decimal(19, 4)
+  feesPaid Decimal? @db.Decimal(19, 4)
+  currency String   @default("GHS") @db.Char(3)
 
   /// Notes
-  remarks        String?
+  remarks String?
 
-  createdAt      DateTime        @default(now())
-  updatedAt      DateTime        @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   student      Student      @relation(fields: [studentId, tenantId], references: [id, tenantId], onDelete: Cascade)
   academicYear AcademicYear @relation(fields: [academicYearId, tenantId], references: [id, tenantId], onDelete: Cascade)
   term         Term         @relation(fields: [termId, tenantId], references: [id, tenantId], onDelete: Cascade)
   campus       Campus       @relation(fields: [campusId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  classGroup   ClassGroup?  @relation(fields: [classId, tenantId], references: [id, tenantId], onDelete: Restrict)
 
   @@unique([id, tenantId])
   @@unique([studentId, termId])
@@ -781,4 +798,42 @@ model Enrolment {
   @@index([tenantId, classId])
   @@index([tenantId, status])
   @@map("enrolment")
+}
+
+/// A class as a group of children for one academic year — Basic 5 A, and who teaches it.
+///
+/// `enrolment.classId` already existed as a nullable uuid with nothing behind it, so a typo
+/// or another school's id went in unnoticed. This gives it a table and a foreign key, and
+/// the key carries `tenantId` so a reference cannot cross schools: a tenant policy checks the
+/// row being written, not the rows it points at, and a foreign-key check is a system
+/// operation RLS is not applied to at all.
+model ClassGroup {
+  id             String @id @default(uuid(7)) @db.Uuid
+  tenantId       String @db.Uuid
+  academicYearId String @db.Uuid
+  campusId       String @db.Uuid
+
+  /// B5A, and the name a parent would recognise.
+  code      String
+  name      String
+  yearLevel Int?
+
+  /// Not a permission. Two teachers hold identical permissions and only one of them is
+  /// responsible for this class, which is what decides who may take its register.
+  classTeacherMembershipId String? @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [academicYearId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  campus       Campus       @relation(fields: [campusId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  classTeacher Membership?  @relation(fields: [classTeacherMembershipId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  enrolments   Enrolment[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, academicYearId, code])
+  @@index([tenantId, academicYearId])
+  @@index([tenantId, classTeacherMembershipId])
+  @@map("class_group")
 }
