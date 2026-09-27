@@ -72,7 +72,7 @@ export async function createAcademicYearAction(
   const input = parsed.data;
 
   return run(async () => {
-    const { db, tenantId, userId, membershipId } = await requirePermission(P.ACADEMIC_YEAR_MANAGE);
+    const { transaction, tenantId, userId, membershipId } = await requirePermission(P.ACADEMIC_YEAR_MANAGE);
 
     const startsOn = toDate(input.startsOn);
     const endsOn = toDate(input.endsOn);
@@ -80,7 +80,7 @@ export async function createAcademicYearAction(
     const rangeError = validateYearRange(startsOn, endsOn);
     if (rangeError) throw new RuleViolation(rangeError, 'endsOn');
 
-    await db.$transaction(async (tx) => {
+    await transaction(async (tx) => {
       // Two ranges overlap when each starts before the other ends. The database carries an
       // exclusion constraint for this as well; the check here exists to name the year it
       // clashes with, which a constraint violation cannot.
@@ -132,9 +132,9 @@ export async function createAcademicYearAction(
 
 export async function activateAcademicYearAction(id: string): Promise<ActionResult> {
   return run(async () => {
-    const { db, tenantId, userId, membershipId } = await requirePermission(P.ACADEMIC_YEAR_MANAGE);
+    const { transaction, tenantId, userId, membershipId } = await requirePermission(P.ACADEMIC_YEAR_MANAGE);
 
-    await db.$transaction(async (tx) => {
+    await transaction(async (tx) => {
       const year = await tx.academicYear.findUnique({ where: { id } });
       if (!year) throw new RuleViolation('That academic year no longer exists.');
 
@@ -164,9 +164,9 @@ export async function activateAcademicYearAction(id: string): Promise<ActionResu
 
 export async function makeAcademicYearCurrentAction(id: string): Promise<ActionResult> {
   return run(async () => {
-    const { db, tenantId, userId, membershipId } = await requirePermission(P.ACADEMIC_YEAR_MANAGE);
+    const { transaction, tenantId, userId, membershipId } = await requirePermission(P.ACADEMIC_YEAR_MANAGE);
 
-    await db.$transaction(async (tx) => {
+    await transaction(async (tx) => {
       const year = await tx.academicYear.findUnique({ where: { id } });
       if (!year) throw new RuleViolation('That academic year no longer exists.');
 
@@ -207,9 +207,9 @@ export async function closeAcademicYearAction(
   const { reason } = parsed.data;
 
   return run(async () => {
-    const { db, tenantId, userId, membershipId } = await requirePermission(P.ACADEMIC_YEAR_MANAGE);
+    const { transaction, tenantId, userId, membershipId } = await requirePermission(P.ACADEMIC_YEAR_MANAGE);
 
-    await db.$transaction(async (tx) => {
+    await transaction(async (tx) => {
       const year = await tx.academicYear.findUnique({ where: { id } });
       if (!year) throw new RuleViolation('That academic year no longer exists.');
 
@@ -281,12 +281,12 @@ export async function createTermAction(
   const input = parsed.data;
 
   return run(async () => {
-    const { db, tenantId, userId, membershipId } = await requirePermission(P.ACADEMIC_YEAR_MANAGE);
+    const { transaction, tenantId, userId, membershipId } = await requirePermission(P.ACADEMIC_YEAR_MANAGE);
 
     const startsOn = toDate(input.startsOn);
     const endsOn = toDate(input.endsOn);
 
-    await db.$transaction(async (tx) => {
+    await transaction(async (tx) => {
       const year = await tx.academicYear.findUnique({ where: { id: academicYearId } });
       if (!year) throw new RuleViolation('That academic year no longer exists.');
       if (year.status === 'CLOSED') {
@@ -356,9 +356,9 @@ export async function createTermAction(
 
 export async function activateTermAction(id: string): Promise<ActionResult> {
   return run(async () => {
-    const { db, tenantId, userId, membershipId } = await requirePermission(P.ACADEMIC_YEAR_MANAGE);
+    const { transaction, tenantId, userId, membershipId } = await requirePermission(P.ACADEMIC_YEAR_MANAGE);
 
-    await db.$transaction(async (tx) => {
+    await transaction(async (tx) => {
       const term = await tx.term.findUnique({ where: { id } });
       if (!term) throw new RuleViolation('That term no longer exists.');
 
@@ -408,9 +408,9 @@ export async function closeTermAction(
   const { reason } = parsed.data;
 
   return run(async () => {
-    const { db, tenantId, userId, membershipId } = await requirePermission(P.ACADEMIC_YEAR_MANAGE);
+    const { transaction, tenantId, userId, membershipId } = await requirePermission(P.ACADEMIC_YEAR_MANAGE);
 
-    await db.$transaction(async (tx) => {
+    await transaction(async (tx) => {
       const term = await tx.term.findUnique({ where: { id } });
       if (!term) throw new RuleViolation('That term no longer exists.');
 

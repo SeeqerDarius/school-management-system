@@ -174,7 +174,65 @@ error, not data:
 curl -s "https://<project-ref>.supabase.co/rest/v1/app_user?select=id&limit=1" -H "apikey: <publishable key>"
 ```
 
-### 5. The first real account
+### 5. Switch to the restricted database role
+
+**Until this step is taken, the row-level security policies enforce nothing in this deployment.**
+
+`20260920000000_rls_tenant_isolation` creates `sankofa_app`, a role declared `NOBYPASSRLS`, and
+`20260921030000_tenant_rls_policies` completes the policy set that binds to it — including the
+`app_user` policies, without which a sign-in as this role finds no readable user row at all.
+The role is created `NOLOGIN` and without a password on purpose — a password written into a
+migration is a password in git, readable by everyone with the repository and preserved in its
+history forever.
+
+So the credential is created here, by hand, once:
+
+```sql
+-- In the Supabase SQL editor, or psql as the project's postgres role.
+ALTER ROLE sankofa_app WITH LOGIN PASSWORD '<generate 32+ random characters>';
+```
+
+Then repoint both connection strings at it — the pooled one the application uses and the direct
+one migrations use. Keep the shape shown in `.env.example` and change only the credentials:
+
+| | `DATABASE_URL` | `DIRECT_URL` |
+| --- | --- | --- |
+| User | `sankofa_app.<project-ref>` | `sankofa_app.<project-ref>` |
+| Password | the value generated above | the same |
+| Port | 6543, Supavisor transaction mode | 5432, session mode |
+| Query string | keep `pgbouncer=true` and the rest | keep as it is |
+
+Everything else — host, database name, `sslmode` — stays exactly as it was. Only the user and
+password change.
+
+(This file states the parts rather than a full URL on purpose: the CI secret scan matches
+anything URL-shaped carrying a password and cannot tell a placeholder from a paste. Rewording is
+the fix; excluding `docs/` from the scan would let a genuinely pasted credential through a
+security gate, which AGENTS.md rule 2 forbids.)
+
+Redeploy so the functions pick up the new values. Nothing else changes: the application code is
+identical under either role, because it binds `app.tenant_id` on every transaction regardless of
+whether anything is reading it.
+
+**Verify it actually took**, because the failure mode here is silent — everything keeps working
+while enforcing nothing:
+
+```sql
+-- Must return f, f. If either is t, the policies are decoration.
+SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user;
+```
+
+Run it as the application's own connection string, not as `postgres`. Asking the wrong role
+answers the wrong question.
+
+> Supabase's own Prisma guide tells you to create this role `WITH ... BYPASSRLS`. Following it
+> reintroduces exactly the hole this step exists to close, and the verification above is how you
+> would find out.
+
+If something goes wrong, the way back is one line — point `DATABASE_URL` at the `postgres` role
+again and redeploy. The policies stay in place and simply stop applying.
+
+### 6. The first real account
 
 There is no self-service registration, so the first administrator has to be created deliberately.
 Do it with a one-off script against production using the same bcrypt work factor as
@@ -183,6 +241,14 @@ Do it with a one-off script against production using the same bcrypt work factor
 
 **Never insert a user row by hand with a password hash from somewhere else.** A hash copied from a
 development database is a development password in production.
+
+Everybody after that is invited from **People** inside the school — the first administrator is
+the only account that has to be created out of band, because somebody has to exist before anybody
+can be invited.
+
+Note that invitations are not emailed: there is no provider configured, so the link is shown once
+to whoever issued it, to pass on. It works once and expires in seven days. Treat it as a
+credential in transit — anyone holding it can set the password for that account.
 
 ---
 
@@ -250,6 +316,26 @@ So:
 
 [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md) covers who to tell and when, including the statutory
 clock that starts when children's data is involved.
+
+---
+
+## The application must not be reachable except through Vercel
+
+This is a requirement the sign-in throttle depends on, not a general preference.
+
+The limiter counts failed attempts per client address, and it learns that address from a
+forwarded header. `x-vercel-forwarded-for` is set by the platform and a caller cannot forge it,
+which is why it is preferred — but the fallback, `x-forwarded-for`, is an ordinary request header
+that is only trustworthy because a proxy overwrites it.
+
+Put the application anywhere a client can reach it directly — a container exposed on its own
+hostname, a tunnel opened for debugging, a second origin pointed at the same deployment — and the
+per-address limit is bypassed completely: a fresh allowance for every fabricated address, at no
+cost to the attacker. **That is worse than having no limiter**, because the account limit still
+holds and the dashboard still reports a control that is doing nothing.
+
+The account limit is unaffected, since it keys on the address being signed in to rather than on
+where the request came from. It is the one carrying the weight if this assumption is ever broken.
 
 ---
 

@@ -25,9 +25,10 @@ const nextConfig: NextConfig = {
       {
         source: '/:path*',
         headers: [
-          // A full Content-Security-Policy with a per-request nonce is the next step, and it
-          // is tracked as a gap in IMPLEMENTATION_STATUS.md rather than quietly omitted.
-          // These are the directives that cost nothing and close real holes today.
+          // The Content-Security-Policy is NOT here. It carries a per-request nonce, which a
+          // static config cannot produce — a fixed nonce is one an attacker reads off the page
+          // and reuses. It is issued by `src/middleware.ts`; these are the headers that are the
+          // same on every response and belong in one place.
           { key: 'X-Content-Type-Options', value: 'nosniff' },
           { key: 'X-Frame-Options', value: 'DENY' },
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },

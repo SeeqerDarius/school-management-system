@@ -117,6 +117,15 @@ is missing is a suite that stops running and never says so.
   forget, which is the only reason this is a rule rather than a hope.
 - Every tenant-owned table gets `tenantId`, and the model is added to the right category in
   `src/server/tenant-scope.ts` in the same change. `tenantScopeCoverage.test.ts` fails otherwise.
+- **A tenant-owned table also gets a row-level security policy in the same migration**, granting
+  `sankofa_app` access to its own school's rows and nothing else. Copy the block from
+  `20260921030000_tenant_rls_policies`. RLS without a policy is a closed table and the product
+  breaks; RLS with a policy nobody tested is theatre. `tests/db/rls-policies.test.ts` fails the
+  build when a table carries `tenantId` and has no policy.
+- A write policy is never enough on its own. Prisma emits `INSERT ... RETURNING` for every
+  `create()`, and PostgreSQL evaluates the **SELECT** policy against the returned row — so a row
+  the application may write but not read fails the statement after passing its `WITH CHECK`.
+  Whatever a migration lets the application insert, it must also let it read back.
 - Constraints the schema language cannot express go in a raw-SQL migration — ordering, non-overlap,
   "at most one current", partial unique indexes. The application checks them too, for the better
   message, but the database is what guarantees them.

@@ -4,7 +4,8 @@
 > weak. If a feature is not listed as built here, assume it is not built, whatever a document or a
 > comment elsewhere implies.
 >
-> Last reviewed: 2026-09-19, after the stack change recorded in
+> Last reviewed: 2026-09-21, after row-level security became a real control and the invitation
+> flow made it possible for a person to have an account at all. The stack change is recorded in
 > [ADR 0010](docs/adr/0010-nextjs-fullstack-on-vercel.md).
 
 ---
@@ -15,7 +16,11 @@ The foundation is built and tested: tenancy, identity, authorization, the academ
 sign-in. Student, guardian and enrolment schemas plus a first student workflow are in progress and
 not yet released. Attendance, fees, accounting, HR and payroll are not built.
 
-One known weakness matters more than the rest and is at the top of the list below.
+The weakness that mattered most — tenant isolation resting entirely on application code — is
+closed in the codebase as of `20260920000000_rls_tenant_isolation` and
+`20260921030000_tenant_rls_policies` together. It is **not** closed in any
+deployment until an operator repoints `DATABASE_URL` at the restricted role — two steps, in
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#5-switch-to-the-restricted-database-role).
 
 ---
 
@@ -32,56 +37,70 @@ One known weakness matters more than the rest and is at the top of the list belo
 | Database invariants | Ordering, non-overlap (exclusion constraints), one-current partial unique indexes, closure recorded, system role code uniqueness | `prisma/migrations/20260919091000_*` |
 | CI | Secret scan, typecheck, lint, unit tests, build, migrations against real PostgreSQL, drift check, idempotent-seed check, tenant isolation suite | `.github/workflows/ci.yml` |
 | Data API lockdown | Deny-all RLS on every table plus REVOKE from `anon`/`authenticated`, idempotent and portable to plain PostgreSQL | `prisma/migrations/20260919092000_data_api_lockdown` |
+| Invitations | Issue an invitation (creates the user with no password, the membership as INVITED, and a single-use 256-bit token stored only as a digest), redeem it to set a password and activate the membership. Screens for both. Delivery is by passing the link on — email is not wired | `src/features/people/**`, `src/lib/invitation.ts` |
+| Sign-in throttling | Escalating lockout per account and per client address, counted from `security_event` and checked before the bcrypt compare; a refusal is logged under its own event type so a lock cannot be held open | `src/server/auth/throttle.ts`, `src/lib/sign-in-throttle.ts` |
+| Content-Security-Policy | Per-request nonce with `strict-dynamic`, issued from middleware; `base-uri`, `form-action`, `object-src` and `frame-ancestors` closed | `src/middleware.ts` |
+| Tenant isolation in the database | Per-tenant policies on every table carrying `tenantId`, read by a transaction-bound `app.tenant_id`; a `NOBYPASSRLS` role to connect as. Not live until an operator repoints `DATABASE_URL` | `prisma/migrations/20260920000000_rls_tenant_isolation`, `prisma/migrations/20260921030000_tenant_rls_policies`, `src/server/db-context.ts` |
 
 ---
 
 ## Known weaknesses
 
-### 1. Row-level security does not enforce tenancy — **highest priority** - IN PROGRESS
+### 1. Row-level security enforces tenancy — but only once an operator switches the role
 
-**Status:** Migration drafted (`20260920000000_rls_tenant_isolation`) but not yet applied or
-validated against a disposable PostgreSQL database. Its `sankofa_app` role is created without
-login; an operator must provision login and a strong password through the deployment secret
-manager before the application can connect as that role.
+Built in `20260921030000_tenant_rls_policies`, and proved by `tests/db/rls-policies.test.ts`,
+which runs **as `sankofa_app`**, the `NOBYPASSRLS` role the application is meant to connect as:
 
-RLS *is* enabled on every table as of migration `20260919092000_data_api_lockdown`, with no
-policies, which closes Supabase's Data API. That is worth having and it is **not** tenant
-isolation.
+- per-tenant policies on `academic_year`, `term`, `campus`, `branding`, `reference_sequence` and
+  `membership`; membership-derived rules for `membership_role` and `membership_permission_grant`;
+  read-shared-but-not-writable handling for `role`; scoped-read handling for `audit_log` and
+  `security_event`; a read-only catalogue for `permission` and `role_permission`;
+- `app.tenant_id`, `app.user_id`, `app.sign_in_email` and — since the invitation flow —
+  `app.invite_email` and `app.invite_token_hash`, all bound per transaction by
+  `src/server/db-context.ts`, so an unbound transaction reads nothing;
+- 19 behavioural assertions: cross-tenant read, read-by-known-id, update, delete and
+  write-by-claim all refused by the database, and — the control that stops the suite passing
+  against a database nobody can use — a school creating and reading back its own rows.
 
-Prisma connects as `postgres`, which carries `BYPASSRLS`. Every policy is skipped for the
-application's own connection, so tenant isolation still rests entirely on the client extension in
-`src/server/tenant-scope.ts` — which lives in the application, and which a `$queryRaw` bypasses.
-The previous Java implementation had real RLS with a non-superuser role and proved it in tests.
-That was lost in the stack change and is not being presented as anything else. See ADR 0010.
+**What is not done, and it is the half that decides whether any of it is live.** The role ships
+`NOLOGIN` and without a password, because a password in a migration is a password in git. Until
+somebody runs the two steps in [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) — grant it a password,
+repoint `DATABASE_URL` — the deployed application still connects as `postgres`, which carries
+`BYPASSRLS`, and every policy above is skipped in that deployment. CI proves the policies work;
+CI cannot prove production is using them.
 
-**Progress:**
-- ⏳ Drafted migration with per-tenant RLS policies for all tenant-owned tables
-- ⏳ Drafted sankofa_app role without BYPASSRLS or an embedded password
-- ⏳ Added withRlsTransaction helper using a bound tenant value for the session variable
-- ⏳ Drafted RLS test suite; database execution remains outstanding
-- ⏳ Migration needs to be applied (requires local PostgreSQL for development)
-- ⏳ DATABASE_URL needs to switch to sankofa_app role
-- ⏳ Existing queries need to move into transactions for session variable support
+So the honest status is: **the control exists and is tested; enabling it is an operator action
+that has not been taken.** Do not read a green pipeline as "production enforces tenancy".
 
-**What remains:**
+Two smaller things worth knowing:
 
-1. Apply the migration: `npm run db:deploy` (after testing locally)
-2. Update DATABASE_URL to use sankofa_app role instead of postgres
-3. Set secure password for sankofa_app role in production
-4. Convert existing data.ts reads to use transactions where needed
-5. Verify RLS enforcement in production environment
+- `$queryRaw` still bypasses the *application* filter, but no longer the database's. There are
+  currently no raw queries in `src/`.
+- `app_user` gained an INSERT policy in `20260921160000_invitation_policies`, admitting exactly
+  the one address named in `app.invite_email`. A bug that built the wrong row is refused by the
+  database, which `tests/db/invitation.test.ts` asserts by trying it.
 
-The migration is a draft, not ready to apply: validate it on a disposable database, finish the
-transaction coverage, then provision the login role from the deployment secret manager. Keep
-application-level scoping in `tenant-scope.ts` as defense-in-depth after RLS is enabled.
+### 2. Throttling covers sign-in and nothing else
 
-### 2. No sign-in throttling
+Sign-in is throttled: five wrong passwords against one account in fifteen minutes locks it for a
+minute, and the ladder climbs steeply from there. It is counted from the security log rather than
+a second table, so the limit and the audit trail cannot disagree about what happened, and it is
+checked before the bcrypt comparison — verified by signing in with the *correct* password during
+a lock and being refused, which is only true if the limiter sits in front.
 
-`recordSecurityEvent` writes every failure, so the trail exists. Nothing acts on it. Credential
-stuffing against parent accounts is currently limited only by Vercel's platform-level rate limits.
+Three limits worth knowing:
 
-*What it takes:* a counter per account and per IP with an escalating lockout, checked before the
-bcrypt compare.
+- **It covers the sign-in path only.** §84 also asks for limits on exports, messaging, SMS
+  dispatch, payment initiation and file upload. Those arrive with the modules that need them.
+- **It trusts the proxy's forwarded address.** `x-vercel-forwarded-for` cannot be set by a
+  caller, but the fallback `x-forwarded-for` can — so the application must be unreachable except
+  through Vercel. Expose it directly and a forged header earns a fresh allowance per fabricated
+  address, which is worse than no limiter because the dashboard still says there is one. Recorded
+  as a deployment requirement in `docs/DEPLOYMENT.md`.
+- **A determined attacker can still lock one known account out** for a minute at a time by
+  failing against it deliberately. That is inherent to account lockout; the mitigation here is
+  that a throttled attempt is recorded as `SIGN_IN_THROTTLED` and is *not* counted as a failure,
+  so the lock always decays rather than being held open indefinitely by continued knocking.
 
 ### 3. No breached-password check
 
@@ -91,15 +110,37 @@ credential-stuffing list in circulation.
 *What it takes:* the Have I Been Pwned range API — k-anonymity, so no password or full hash leaves
 the server — checked at password set time.
 
-### 4. No Content-Security-Policy
+### 4. The Content-Security-Policy still allows inline styles
 
-`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy` and `Permissions-Policy` are set.
-A nonce-based `script-src` is not, so an injected inline script would execute.
+`script-src` is nonce-based with `strict-dynamic`, and a browser was used to confirm it: a
+parser-inserted `<script>` spliced into the page — inline and by `src` — is refused, while the
+application still renders and hydrates with no violations. `base-uri`, `form-action`,
+`object-src` and `frame-ancestors` are closed too.
 
-### 5. No invitation flow
+`style-src` keeps `'unsafe-inline'`, because Next injects inline styles during hydration and for
+font loading and nonce-ing them is not reliably supported. Injected CSS can restyle a page and
+exfiltrate through selectors; it cannot execute. That makes it a smaller hole than the one that
+closed, but it is a hole and it is not being described as anything else.
 
-`AppUser.inviteTokenHash` exists in the schema. Nothing issues, sends or redeems an invitation, so
-the only way to create an account today is the seed or a manual insert. Email is unwired entirely.
+### 5. Invitations work, but nothing emails them
+
+A school admin can invite somebody from **People**, and that person sets a password and signs in.
+Driven end to end in a browser: invite issued, link redeemed in a clean session, the invited
+teacher signed in and landed in the app, and replaying the same link was refused.
+
+What is missing is delivery. There is no email provider configured, so the link is shown to the
+person who issued it, once, to pass on. That is a usable product behaviour — a school office is
+as likely to send it over WhatsApp as by email — but it has two consequences worth stating:
+
+- **Redemption does not prove control of the address.** Following a link proves possession of
+  the link. `emailVerified` therefore stays `false`, and nothing yet sets it to true.
+- **A link handed to the wrong person is an account.** It expires in seven days and works once,
+  which bounds the exposure but does not remove it.
+
+Also not built: **withdrawing an invitation or ending a membership.** There is no way to remove
+somebody's access from the UI yet. Ending a membership is tenant-owned and straightforward; the
+reason it is not here is that it is membership management rather than invitation, and it wants
+its own change with a confirmation step.
 
 ### 6. No error tracking, no uptime monitoring, no independent backup
 
@@ -138,7 +179,12 @@ invariants are now held by review and by the tests named above.
 
 The whole product, essentially. Listed so nobody has to guess.
 
+<<<<<<< HEAD
 - Students, guardians, enrolment and admissions (in progress: schema, student list, admission and profile views; guardian and enrolment workflows remain incomplete)
+=======
+- Withdrawing an invitation, ending or suspending a membership
+- Students, guardians, enrolment, admissions
+>>>>>>> d234208 (feat(people): invitations, so somebody other than the seed can have an account)
 - Classes, subjects, timetable
 - Attendance
 - Assessment, grading, report cards
@@ -169,11 +215,15 @@ exists.
 | `tests/db/tenant-isolation.test.ts` | `npm run test:db` | Cross-tenant read, update, delete and write-by-claim all fail, against real PostgreSQL |
 | `tests/db/calendar-constraints.test.ts` | `npm run test:db` | The database, not the application, refuses overlapping and backwards periods |
 | `tests/db/data-api-lockdown.test.ts` | `npm run test:db` | No table lacks RLS; the Data API roles hold nothing; btree_gist is out of `public` |
-| `tests/db/rls-tenant-isolation.test.ts` | `npm run test:db` | Tenant policies deny unscoped reads, isolate School A from B, and reject cross-school student-campus links |
-| `tests/db/rls-tenant-isolation.test.ts` | `npm run test:db` | Tenant policies deny unscoped reads, isolate School A from B, and reject cross-school student-campus links |
+| `src/lib/invitation.test.ts` | `npm test` | Tokens are unique and 256-bit, the stored digest is not the token, expiry is inclusive at the boundary, and a missing expiry counts as expired |
+| `tests/db/invitation.test.ts` | `npm run test:db` | As the non-bypassing role: an invitation may create exactly the address it declared and no other; a token finds one user; a spent token finds nobody |
+| `src/lib/sign-in-throttle.test.ts` | `npm test` | Every rung of the lockout ladder, on both sides of each boundary, and that a lock counts down from the most recent failure |
+| `src/middleware.test.ts` | `npm test` | The CSP carries a fresh nonce per response, never allows eval in production, and keeps `base-uri`/`form-action`/`object-src` closed |
+| `tests/db/sign-in-throttle.test.ts` | `npm run test:db` | The limiter counts the right rows over the right window; a nonexistent account throttles like a real one; a refusal is not counted as a failure |
+| `tests/db/rls-policies.test.ts` | `npm run test:db` | Connecting **as the non-bypassing role**: an unbound transaction reads nothing, a bound one reads only its own school, cross-tenant write-by-claim is refused by PostgreSQL, and a school can still do its own work |
 
-**Not tested yet:** the sign-in path end to end, the calendar actions against a database, session
-revocation, permission resolution with DENY grants. Those need either a database fixture with
+**Not tested yet:** the calendar actions against a database, session revocation, permission
+resolution with DENY grants. Those need either a database fixture with
 seeded users or a browser test, and neither exists.
 
 There is no coverage threshold. A percentage would measure lines executed, not behaviour asserted,

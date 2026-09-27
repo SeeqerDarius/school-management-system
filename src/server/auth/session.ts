@@ -4,7 +4,7 @@ import { getServerSession } from 'next-auth';
 import { redirect } from 'next/navigation';
 
 import { authOptions } from '@/server/auth/options';
-import { forTenant, type TenantClient } from '@/server/tenant-scope';
+import { inTenantTransaction, type TenantTx } from '@/server/tenant-scope';
 
 /**
  * Reading and enforcing the current session.
@@ -21,8 +21,19 @@ export interface ActiveSession {
   /** What the school calls itself, for anywhere a person has to read it. */
   tenantName: string;
   permissions: Set<string>;
-  /** A Prisma client that cannot see outside this tenant. */
-  db: TenantClient;
+  /**
+   * Runs database work for this school.
+   *
+   * <p>A runner rather than a client, because the tenant has to be bound inside a transaction
+   * for the row-level security policies to see it — see `db-context.ts`. Handing out a bare
+   * client would let a caller query outside one, which under the restricted role returns
+   * nothing and looks like missing data rather than a missing binding.
+   *
+   * ```ts
+   * const years = await session.transaction((db) => db.academicYear.findMany());
+   * ```
+   */
+  transaction: <T>(work: (db: TenantTx) => Promise<T>) => Promise<T>;
 }
 
 /** The raw session, or null. Use the `require*` helpers unless you genuinely handle null. */
@@ -56,7 +67,8 @@ export async function requireActiveSession(): Promise<ActiveSession> {
     tenantSlug: session.tenantSlug ?? '',
     tenantName: active?.tenant.displayName ?? session.tenantSlug ?? '',
     permissions: new Set(session.permissions ?? []),
-    db: forTenant(session.tenantId),
+    transaction: (work) =>
+      inTenantTransaction({ tenantId: session.tenantId as string, userId: session.userId }, work),
   };
 }
 
