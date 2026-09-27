@@ -91,6 +91,9 @@ model Tenant {
 
   classGroups ClassGroup[]
 
+  attendanceRegisters AttendanceRegister[]
+  attendanceEntries   AttendanceEntry[]
+
   @@index([status])
   @@map("tenant")
 }
@@ -542,6 +545,8 @@ model Term {
   academicYear AcademicYear @relation(fields: [academicYearId, tenantId], references: [id, tenantId], onDelete: Cascade)
   enrolments   Enrolment[]
 
+  attendanceRegisters AttendanceRegister[]
+
   @@unique([id, tenantId])
   @@unique([academicYearId, sequence])
   @@unique([academicYearId, code])
@@ -628,6 +633,8 @@ model Student {
   campus        Campus                 @relation(fields: [campusId, tenantId], references: [id, tenantId], onDelete: Restrict)
   guardianships GuardianRelationship[]
   enrollments   Enrolment[]
+
+  attendanceEntries AttendanceEntry[]
 
   @@unique([id, tenantId])
   @@unique([tenantId, reference])
@@ -831,9 +838,102 @@ model ClassGroup {
   classTeacher Membership?  @relation(fields: [classTeacherMembershipId, tenantId], references: [id, tenantId], onDelete: Restrict)
   enrolments   Enrolment[]
 
+  registers AttendanceRegister[]
+
   @@unique([id, tenantId])
   @@unique([tenantId, academicYearId, code])
   @@index([tenantId, academicYearId])
   @@index([tenantId, classTeacherMembershipId])
   @@map("class_group")
+}
+
+enum RegisterStatus {
+  DRAFT
+  SUBMITTED
+  LOCKED
+}
+
+enum AttendanceStatus {
+  PRESENT
+  ABSENT
+  LATE
+  EXCUSED
+}
+
+/// One class, one school day.
+///
+/// The register is evidence. It is read back by a statutory return, by a safeguarding review
+/// and, when a child comes to harm, by somebody asking who knew they were not in school — so
+/// the rules that matter about it live in the database rather than only in an action.
+model AttendanceRegister {
+  id           String @id @default(uuid(7)) @db.Uuid
+  tenantId     String @db.Uuid
+  classGroupId String @db.Uuid
+  /// The term the session date falls in. Carried rather than derived so the roll for a day is
+  /// one join, and so a register cannot outlive the term it was taken in.
+  termId       String @db.Uuid
+
+  /// The school day, in the SCHOOL's timezone. Not the server's — see src/lib/attendance.ts.
+  sessionDate DateTime       @db.Date
+  status      RegisterStatus @default(DRAFT)
+
+  takenByMembershipId     String?   @db.Uuid
+  submittedAt             DateTime?
+  submittedByMembershipId String?   @db.Uuid
+  lockedAt                DateTime?
+  lockedByMembershipId    String?   @db.Uuid
+  /// Why it was locked — a statutory return, an end-of-term close.
+  lockedReason            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant     Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  classGroup ClassGroup        @relation(fields: [classGroupId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  term       Term              @relation(fields: [termId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  entries    AttendanceEntry[]
+
+  @@unique([id, tenantId])
+  @@unique([classGroupId, sessionDate])
+  @@index([tenantId, sessionDate])
+  @@index([tenantId, status])
+  @@map("attendance_register")
+}
+
+/// One child, one register.
+///
+/// A child with no entry is NOT a child recorded as away — it is a child nobody accounted for,
+/// which is the state a register exists to make visible. That is why absence is a status here
+/// and not the absence of a row.
+model AttendanceEntry {
+  id         String @id @default(uuid(7)) @db.Uuid
+  tenantId   String @db.Uuid
+  registerId String @db.Uuid
+  studentId  String @db.Uuid
+
+  status      AttendanceStatus
+  /// Minutes late, where the status is LATE.
+  minutesLate Int?
+  /// Required for EXCUSED — an excusal without a reason is indistinguishable from a guess.
+  reason      String?
+
+  markedByMembershipId    String?   @db.Uuid
+  markedAt                DateTime  @default(now())
+  /// Set when the mark was changed after the register was submitted. A correction to a record
+  /// somebody has already relied on is a different act from filling one in.
+  correctedAt             DateTime?
+  correctedByMembershipId String?   @db.Uuid
+  correctionReason        String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant             @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  register AttendanceRegister @relation(fields: [registerId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  student  Student            @relation(fields: [studentId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@unique([registerId, studentId])
+  @@index([tenantId, studentId])
+  @@map("attendance_entry")
 }
