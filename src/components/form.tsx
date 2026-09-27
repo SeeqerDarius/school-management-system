@@ -110,7 +110,7 @@ export function TextAreaField({
 }: {
   label: string;
   name: string;
-  hint?: string;
+  hint?: string | undefined;
   error?: string | undefined;
   required?: boolean;
   rows?: number;
@@ -165,6 +165,7 @@ export function Field({
   hint,
   placeholder,
   autoComplete,
+  inputMode,
 }: {
   label: string;
   name: string;
@@ -172,14 +173,22 @@ export function Field({
   defaultValue?: string | undefined;
   required?: boolean;
   error?: string | undefined;
-  hint?: string;
-  placeholder?: string;
+  hint?: string | undefined;
+  placeholder?: string | undefined;
   /**
    * Passed through so password managers behave. `new-password` on a field somebody is choosing
    * a password in is what makes a manager offer to generate and store one, and leaving it off
    * is a large part of why people type the same password everywhere.
    */
-  autoComplete?: string;
+  autoComplete?: string | undefined;
+  /**
+   * The on-screen keyboard to offer, independently of the input's type.
+   *
+   * <p>An amount is `type="text"` with `inputMode="decimal"`, never `type="number"`. A number
+   * input hands back a value the browser has already parsed and re-rendered, and money in this
+   * product is a string from end to end precisely so nothing ever does that to it.
+   */
+  inputMode?: 'text' | 'decimal' | 'numeric' | 'tel' | 'email';
 }) {
   const id = useId();
   const errorId = `${id}-error`;
@@ -211,6 +220,7 @@ export function Field({
         required={required}
         placeholder={placeholder}
         autoComplete={autoComplete}
+        inputMode={inputMode}
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy.length > 0 ? describedBy : undefined}
         className={clsx(
@@ -273,9 +283,9 @@ export function SelectField({
   defaultValue?: string | undefined;
   required?: boolean;
   error?: string | undefined;
-  hint?: string;
+  hint?: string | undefined;
   /** Shown as a non-selectable first row when nothing is chosen yet. */
-  placeholder?: string;
+  placeholder?: string | undefined;
 }) {
   const id = useId();
   const errorId = `${id}-error`;
@@ -327,6 +337,46 @@ export function SelectField({
           {error}
         </p>
       )}
+    </div>
+  );
+}
+
+/** A single checkbox with its label and hint, for a setting rather than a value. */
+export function CheckboxField({
+  label,
+  name,
+  defaultChecked,
+  hint,
+}: {
+  label: string;
+  name: string;
+  defaultChecked?: boolean;
+  hint?: string | undefined;
+}) {
+  const id = useId();
+  const hintId = `${id}-hint`;
+
+  return (
+    <div className="flex items-start gap-2">
+      <input
+        id={id}
+        name={name}
+        type="checkbox"
+        defaultChecked={defaultChecked}
+        aria-describedby={hint ? hintId : undefined}
+        className="mt-0.5 size-4 rounded border-[var(--color-border-strong)]
+                   accent-[var(--color-primary)]"
+      />
+      <div className="min-w-0">
+        <label htmlFor={id} className="text-sm text-[var(--color-ink)]">
+          {label}
+        </label>
+        {hint && (
+          <p id={hintId} className="text-xs text-[var(--color-ink-muted)]">
+            {hint}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

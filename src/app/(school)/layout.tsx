@@ -38,6 +38,7 @@ export default async function SchoolLayout({
     // about a class as a group, and a child's own attendance is on the child's own record.
     { href: '/classes', label: 'Classes', show: !isFamily && may(P.CLASS_VIEW, P.ATTENDANCE_VIEW) },
     { href: '/attendance', label: 'Attendance', show: !isFamily && may(P.ATTENDANCE_VIEW) },
+    { href: '/fees', label: 'Fees', show: may(P.FEES_VIEW) },
     { href: '/settings/people', label: 'People', show: may(P.USER_VIEW) },
   ].filter((link) => link.show);
 
