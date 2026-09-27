@@ -4,7 +4,14 @@
 
 ## Status
 
-Accepted — 2026-09-18
+Superseded by [ADR 0010](0010-nextjs-fullstack-on-vercel.md) — 2026-09-19.
+Accepted 2026-09-18.
+
+With the Java service gone there is no second build to coordinate, so there is no monorepo to
+tool. The repository is now a single Next.js application at its root. See ADR 0010.
+
+The reasoning below is kept as written. It is the record of what was decided and why, not a
+description of the system as it stands; ADR 0010 says what replaced it.
 
 **Implementation status: partly built.** `services/core-api/pom.xml` exists and is the real
 Maven build. The workspace directories (`apps/web`, `packages/api-client`, `packages/config`,

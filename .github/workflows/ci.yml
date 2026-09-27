@@ -1,7 +1,7 @@
 name: CI
 
 # Quality gates. A failure here blocks the merge — the gate is not advisory, and it is not
-# something to work around by weakening a rule or disabling a test (AGENTS.md §1).
+# something to work around by weakening a rule or deleting a test (AGENTS.md §1).
 on:
   push:
     branches: [main]
@@ -17,8 +17,7 @@ permissions:
   contents: read
 
 env:
-  JAVA_VERSION: '25'
-  JAVA_DISTRIBUTION: temurin
+  NODE_VERSION: '24'
 
 jobs:
   # ---------------------------------------------------------------------------------
@@ -33,17 +32,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Reject committed service-account files and private keys
+      - name: Reject committed credential files and private keys
         run: |
           set -euo pipefail
           # Filenames that should never exist in the tree at all.
-          if git ls-files | grep -E '(serviceAccount.*\.json|firebase-adminsdk.*\.json|\.pem$|\.p12$|\.jks$|^\.env$)' ; then
+          if git ls-files | grep -E '(serviceAccount.*\.json|\.pem$|\.p12$|\.jks$|^\.env$)' ; then
             echo "::error::A credential-shaped file is tracked in git. Remove it and rotate the credential."
             exit 1
           fi
           # Content patterns. .env.example is excluded by name because it is deliberately
           # full of dummy values that look like the real thing.
-          if git grep -nIE '(BEGIN (RSA|EC|OPENSSH|PGP) PRIVATE KEY|"private_key_id"|sk_live_[0-9a-zA-Z]{20,})' \
+          if git grep -nIE '(BEGIN (RSA|EC|OPENSSH|PGP) PRIVATE KEY|"private_key_id"|sk_live_[0-9a-zA-Z]{20,}|postgres(ql)?://[^ "'"'"']*:[^ "'"'"'@]+@)' \
                -- ':!.env.example' ':!.github/workflows/*' ; then
             echo "::error::A secret-shaped literal is present in tracked content."
             exit 1
@@ -54,135 +53,159 @@ jobs:
           set -euo pipefail
           # NEXT_PUBLIC_* is inlined into the client bundle. Anything secret behind that
           # prefix is published to every visitor.
-          if git grep -nIE 'NEXT_PUBLIC_[A-Z0-9_]*(SECRET|PRIVATE|SERVICE_ACCOUNT|PASSWORD|TOKEN)' \
+          if git grep -nIE 'NEXT_PUBLIC_[A-Z0-9_]*(SECRET|PRIVATE|PASSWORD|TOKEN|KEY)' \
                -- ':!.github/workflows/*' ; then
             echo "::error::A secret is exposed through a NEXT_PUBLIC_ variable (AGENTS.md §1.5)."
             exit 1
           fi
 
   # ---------------------------------------------------------------------------------
-  # Backend: compile, unit tests, integration tests against real PostgreSQL.
-  # ---------------------------------------------------------------------------------
-  core-api:
-    name: Core API
-    runs-on: ubuntu-latest
-    needs: secret-scan
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up JDK ${{ env.JAVA_VERSION }}
-        uses: actions/setup-java@v4
-        with:
-          java-version: ${{ env.JAVA_VERSION }}
-          distribution: ${{ env.JAVA_DISTRIBUTION }}
-          cache: maven
-
-      # `verify` runs surefire (unit) and failsafe (integration). Integration tests start an
-      # embedded PostgreSQL and connect as a NON-SUPERUSER role, so row level security is
-      # actually exercised rather than bypassed. No Docker service container is needed.
-      - name: Build, test and verify
-        working-directory: services/core-api
-        run: ./mvnw -B -ntp verify
-
-      - name: Confirm the tenant isolation suite actually ran
-        working-directory: services/core-api
-        run: |
-          set -euo pipefail
-          report=target/failsafe-reports/TEST-io.sankofa.school.tenancy.TenantIsolationIT.xml
-          if [ ! -f "$report" ]; then
-            echo "::error::TenantIsolationIT did not run. A tenant-isolation defect is"
-            echo "::error::release-blocking, so a silently skipped suite is a build failure."
-            exit 1
-          fi
-          # A suite that runs zero tests passes trivially. Catch that too.
-          if grep -q 'tests="0"' "$report"; then
-            echo "::error::TenantIsolationIT reported zero tests."
-            exit 1
-          fi
-          echo "Tenant isolation suite ran:"
-          grep -o 'tests="[0-9]*" *[^>]*failures="[0-9]*"' "$report" | head -1
-
-      # Migrations are already validated for real by the integration tests: TestDatabase runs
-      # the full chain against an empty embedded PostgreSQL before any test executes, so a
-      # broken migration fails the build above. A separate flyway:validate step with no
-      # database would be theatre.
-
-      - name: Upload test reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: core-api-test-reports
-          path: |
-            services/core-api/target/surefire-reports/
-            services/core-api/target/failsafe-reports/
-            services/core-api/target/site/jacoco/
-          retention-days: 14
-
-  # ---------------------------------------------------------------------------------
-  # Web: typecheck, lint and production build.
+  # Typecheck, lint, the fast tests and a production build.
   #
   # Lint is its own step rather than a side effect of the build. Next 16 removed ESLint from
   # `next build`, so relying on the build to run it would have meant lint quietly stopped
   # happening at the upgrade with nothing failing to say so.
   # ---------------------------------------------------------------------------------
-  web:
-    name: Web
+  quality:
+    name: Typecheck, lint, test, build
     runs-on: ubuntu-latest
     needs: secret-scan
+
+    # The build evaluates these but never uses their values: no tenant-scoped route is
+    # prerendered, because every one of them is force-dynamic. They are obvious placeholders
+    # so nobody mistakes them for configuration that matters.
+    env:
+      DATABASE_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+      DIRECT_URL: postgresql://placeholder:placeholder@localhost:5432/placeholder
+      NEXTAUTH_SECRET: ci-placeholder-value-never-used-for-anything-real
+      NEXTAUTH_URL: http://localhost:3000
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: ${{ env.NODE_VERSION }}
           cache: npm
 
       - name: Install
         run: npm ci --no-audit --no-fund
 
+      - name: Generate the Prisma client
+        run: npm run db:generate
+
       - name: Typecheck
-        run: npm run typecheck --workspaces --if-present
+        run: npm run typecheck
 
       - name: Lint
-        run: npm run lint --workspaces --if-present
+        run: npm run lint
 
-      # The build needs these present to evaluate, but never uses their values: no page is
-      # prerendered, because every tenant-scoped route is force-dynamic. They are obvious
-      # placeholders so nobody mistakes them for configuration that matters.
+      - name: Test
+        run: npm test
+
       - name: Build
-        env:
-          CORE_API_BASE_URL: http://localhost:8080
-          SESSION_SECRET: ci-placeholder-value-never-used-for-anything-real
         run: npm run build
 
   # ---------------------------------------------------------------------------------
-  # The RBAC seed is generated from the Java constants. If someone edits the migration
-  # by hand, or adds a constant without regenerating, the two silently disagree.
+  # Everything that needs a real database.
+  #
+  # Tenant isolation cannot be proved against a mock: a mock agrees that the filter was
+  # applied, which is the thing in doubt. A defect here is release-blocking, so this job
+  # also refuses to pass if the isolation suite reported no tests at all.
   # ---------------------------------------------------------------------------------
-  generated-files-are-current:
-    name: Generated files are current
+  database:
+    name: Migrations, seed and tenant isolation
     runs-on: ubuntu-latest
     needs: secret-scan
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: sankofa
+          POSTGRES_PASSWORD: sankofa
+          POSTGRES_DB: sankofa_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # No pooler in CI, so both point at the same place. In production DATABASE_URL is
+      # Supabase's Supavisor in transaction mode (:6543, with pgbouncer=true) and DIRECT_URL
+      # is Supavisor in session mode (:5432), because migrations cannot run through a
+      # transaction pooler.
+      DATABASE_URL: postgresql://sankofa:sankofa@localhost:5432/sankofa_ci
+      DIRECT_URL: postgresql://sankofa:sankofa@localhost:5432/sankofa_ci
+      NEXTAUTH_SECRET: ci-placeholder-value-never-used-for-anything-real
+      NEXTAUTH_URL: http://localhost:3000
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
 
-      - name: Regenerate the RBAC seed and diff
+      - name: Install
+        run: npm ci --no-audit --no-fund
+
+      - name: Generate the Prisma client
+        run: npm run db:generate
+
+      # Applies the whole chain to an empty database, exactly as a deploy does. A migration
+      # that only works on a database that already has the previous state fails here.
+      - name: Apply migrations
+        run: npm run db:deploy
+
+      # Catches a schema.prisma edited without a matching migration. Without this the
+      # application and the database disagree, and the first anyone hears of it is a
+      # production query failing on a column that does not exist.
+      - name: Fail if the schema and the migrations disagree
         run: |
           set -euo pipefail
-          node scripts/generate-rbac-seed.mjs
-          if ! git diff --exit-code -- services/core-api/src/main/resources/db/migration/V0003__permission_catalogue.sql; then
-            echo "::error::V0003 is out of date with Permissions.java."
-            echo "::error::Run: node scripts/generate-rbac-seed.mjs — and do not hand-edit the migration."
+          npx prisma migrate diff \
+            --from-url "$DATABASE_URL" \
+            --to-schema-datamodel prisma/schema.prisma \
+            --exit-code && echo "No drift." && exit 0
+          echo "::error::prisma/schema.prisma does not match the applied migrations."
+          echo "::error::Run: npm run db:migrate -- --name <what-you-changed>"
+          exit 1
+
+      - name: Seed
+        run: npm run db:seed
+
+      # The seed is idempotent by design. Running it twice is how that claim gets tested
+      # rather than merely asserted in a comment.
+      - name: Seed again, to prove it is idempotent
+        run: npm run db:seed
+
+      - name: Tenant isolation and database constraints
+        run: npm run test:db -- --reporter=verbose --reporter=json --outputFile=db-results.json
+
+      - name: Confirm the isolation suite actually ran
+        if: always()
+        run: |
+          set -euo pipefail
+          if [ ! -f db-results.json ]; then
+            echo "::error::The database suite produced no results file. It did not run."
             exit 1
           fi
+          total=$(node -e "process.stdout.write(String(require('./db-results.json').numTotalTests ?? 0))")
+          if [ "$total" -eq 0 ]; then
+            echo "::error::The database suite reported zero tests. A silently skipped"
+            echo "::error::tenant-isolation suite is a build failure, not a pass."
+            exit 1
+          fi
+          echo "Database suite ran $total tests."
 
   # ---------------------------------------------------------------------------------
-  # Migrations are history. Editing an applied one breaks the checksum in every
-  # environment that already ran it (AGENTS.md §8).
+  # Migrations are history. Editing one that has already been applied breaks its checksum
+  # in every environment that ran it (AGENTS.md §8).
   # ---------------------------------------------------------------------------------
   migrations-are-append-only:
     name: Migrations are append-only
@@ -198,8 +221,7 @@ jobs:
           set -euo pipefail
           base="origin/${{ github.base_ref }}"
           git fetch --no-tags --depth=50 origin "${{ github.base_ref }}"
-          changed=$(git diff --name-status "$base"...HEAD -- \
-            'services/core-api/src/main/resources/db/migration/**' || true)
+          changed=$(git diff --name-status "$base"...HEAD -- 'prisma/migrations/**' || true)
           # Added (A) is fine. Modified (M), Deleted (D) or Renamed (R) is not.
           offenders=$(echo "$changed" | grep -E '^[MDR]' || true)
           if [ -n "$offenders" ]; then
@@ -211,7 +233,9 @@ jobs:
           echo "Migration changes are additive only."
 
   # ---------------------------------------------------------------------------------
-  # Dependency vulnerabilities.
+  # Dependency vulnerabilities. GitHub's dependency-review action requires GitHub Advanced
+  # Security on private repositories. `npm audit` checks the complete locked dependency tree
+  # without that plan requirement.
   # ---------------------------------------------------------------------------------
   dependency-review:
     name: Dependency review
@@ -219,10 +243,13 @@ jobs:
     if: github.event_name == 'pull_request'
     permissions:
       contents: read
-      pull-requests: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/dependency-review-action@v4
+      - uses: actions/setup-node@v4
         with:
-          fail-on-severity: high
-          comment-summary-in-pr: on-failure
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check for high or critical dependency vulnerabilities
+        run: npm audit --audit-level=high

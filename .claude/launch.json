@@ -2,9 +2,9 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "web",
+      "name": "sankofa",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["run", "dev", "--workspace=@sankofa/web"],
+      "runtimeArgs": ["run", "dev"],
       "port": 3000
     }
   ]

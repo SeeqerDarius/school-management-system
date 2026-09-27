@@ -6,7 +6,16 @@
 
 ## Status
 
-Accepted — 2026-09-18
+Superseded by [ADR 0010](0010-nextjs-fullstack-on-vercel.md) — 2026-09-19.
+Accepted 2026-09-18.
+
+The separate Java service was built and then retired. What changed was not the argument —
+most of it still holds — but the constraint it was weighed against: this product has to deploy
+to Vercel in one step, and a second runtime with its own host, its own image and its own
+deployment path made that impossible. See ADR 0010.
+
+The reasoning below is kept as written. It is the record of what was decided and why, not a
+description of the system as it stands; ADR 0010 says what replaced it.
 
 ## Context
 

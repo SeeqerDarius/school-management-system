@@ -1,0 +1,784 @@
+// =====================================================================================
+// Sankofa School Platform — data model
+//
+// Multi-tenant: every tenant-owned table carries `tenantId`, and queries reach the
+// database through a tenant-scoped client that injects that filter, so it cannot be
+// forgotten at a call site. See src/server/db/tenant-scope.ts.
+//
+// Conventions:
+//   * UUIDv7 primary keys — time-ordered, so index inserts stay at the right edge, and
+//     non-sequential in public, so one tenant cannot enumerate another's records.
+//   * Human-facing references (STU-2026-000123) are a separate column, allocated by a
+//     concurrency-safe counter, never the primary key.
+//   * Money is Decimal(19,4) with an explicit currency. Never Float.
+//   * Timestamps are UTC. Calendar-only values use @db.Date.
+//   * Enumerations are Prisma enums; lifecycle is a state machine, never a set of booleans.
+// =====================================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Pooled connection for the application (Supabase's Supavisor, transaction mode).
+  url       = env("DATABASE_URL")
+  // Session-mode connection for migrations, which cannot run through a transaction pooler.
+  // Not the db.<ref>.supabase.co host: that is IPv6-only and unreachable from CI.
+  directUrl = env("DIRECT_URL")
+}
+
+// =====================================================================================
+// Platform
+// =====================================================================================
+
+enum TenantStatus {
+  PROVISIONING
+  TRIAL
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CANCELLED
+  CLOSED
+}
+
+enum OnboardingState {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETE
+}
+
+/// One subscribing school organisation. The unit of data isolation.
+model Tenant {
+  id     String       @id @default(uuid(7)) @db.Uuid
+  /// Subdomain label. A routing hint for the UI only — never the authorization decision.
+  slug   String       @unique
+  legalName   String
+  displayName String
+  shortName   String?
+  status      TenantStatus    @default(PROVISIONING)
+
+  // Localisation defaults. Ghana is the first optimized configuration, not the only
+  // supported one — these are data, never assumptions baked into code.
+  countryCode     String  @db.Char(2)
+  defaultCurrency String  @db.Char(3)
+  timezone        String  @default("UTC")
+  locale          String  @default("en-GH")
+  dateFormat      String  @default("dd/MM/yyyy")
+  customDomain    String? @unique
+
+  onboardingState OnboardingState @default(NOT_STARTED)
+  activatedAt     DateTime?
+  suspendedAt     DateTime?
+  closedAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships       Membership[]
+  roles             Role[]
+  campuses          Campus[]
+  academicYears     AcademicYear[]
+  terms             Term[]
+  branding          Branding?
+  auditLogs         AuditLog[]
+  securityEvents    SecurityEvent[]
+  referenceSequences ReferenceSequence[]
+  students          Student[]
+  guardians         Guardian[]
+  guardianRelationships GuardianRelationship[]
+  enrolments        Enrolment[]
+
+  @@index([status])
+  @@map("tenant")
+}
+
+/// Concurrency-safe numbering for human-facing references: STU-2026-000123, REC-2026-000932.
+/// Allocation takes a row lock so two cashiers cannot mint the same receipt number.
+model ReferenceSequence {
+  tenantId  String @db.Uuid
+  scope     String
+  periodKey String @default("")
+  prefix    String @default("")
+  padWidth  Int    @default(6)
+  nextValue BigInt @default(1)
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@id([tenantId, scope, periodKey])
+  @@map("reference_sequence")
+}
+
+// =====================================================================================
+// Identity and access
+//
+// Authorization is expressed as granular permissions, never as role-name comparisons
+// scattered through the code. A role is a bundle a school can redefine; a permission code
+// is a stable capability the code can reason about.
+// =====================================================================================
+
+enum UserStatus {
+  PENDING_INVITE
+  ACTIVE
+  DISABLED
+  LOCKED
+  CLOSED
+}
+
+/// One row per human, platform-wide. A parent with children at two subscribing schools is
+/// ONE user with TWO memberships.
+model AppUser {
+  id    String @id @default(uuid(7)) @db.Uuid
+  email String @unique
+  emailVerified Boolean @default(false)
+
+  /// bcrypt. Null until an invited user sets their password.
+  passwordHash String?
+
+  fullName      String
+  preferredName String?
+  phoneE164     String?
+  avatarPath    String?
+  locale        String?
+  timezone      String?
+
+  status       UserStatus @default(PENDING_INVITE)
+  mfaEnrolled  Boolean    @default(false)
+  mfaRequired  Boolean    @default(false)
+
+  /// Any session issued before this instant is rejected, so a compromised account can be
+  /// cut off without waiting for a token to expire.
+  sessionsValidFrom DateTime @default(now())
+  lastLoginAt       DateTime?
+
+  /// Single-use, hashed. Set when a school invites someone or a password reset is requested.
+  inviteTokenHash String?   @unique
+  inviteExpiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships    Membership[]
+  auditLogs      AuditLog[]
+  securityEvents SecurityEvent[]
+
+  @@index([status])
+  @@map("app_user")
+}
+
+/// The global catalogue of granular capabilities. The only unit an access check consults.
+model Permission {
+  id          String  @id @default(uuid(7)) @db.Uuid
+  /// MODULE_NOUN_VERB. Stable forever — a mistake is corrected by adding the right code
+  /// and deprecating the wrong one, never by editing in place.
+  code        String  @unique
+  module      String
+  description String
+  /// Must be assigned individually, never swept in by a "grant the whole module" convenience.
+  isSensitive Boolean @default(false)
+  /// Touches a child's health, discipline, counselling record or whereabouts.
+  isChildSensitive Boolean @default(false)
+
+  rolePermissions RolePermission[]
+  directGrants    MembershipPermissionGrant[]
+
+  @@index([module])
+  @@map("permission")
+}
+
+enum RoleScope {
+  PLATFORM
+  SCHOOL
+}
+
+/// A named bundle of permissions. `tenantId == null` marks a system template every tenant
+/// may use; a tenant may also define its own.
+model Role {
+  id          String    @id @default(uuid(7)) @db.Uuid
+  tenantId    String?   @db.Uuid
+  code        String
+  name        String
+  description String?
+  scope       RoleScope @default(SCHOOL)
+  isSystem    Boolean   @default(false)
+  isAssignable Boolean  @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant          Tenant?          @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  permissions     RolePermission[]
+  memberEntries   MembershipRole[]
+
+  @@unique([tenantId, code])
+  @@map("role")
+}
+
+model RolePermission {
+  roleId       String @db.Uuid
+  permissionId String @db.Uuid
+  grantedAt    DateTime @default(now())
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+  @@map("role_permission")
+}
+
+enum MembershipStatus {
+  INVITED
+  ACTIVE
+  SUSPENDED
+  ENDED
+}
+
+enum PrincipalType {
+  STAFF
+  TEACHER
+  STUDENT
+  GUARDIAN
+  PLATFORM
+  SUPPORT
+}
+
+/// User × tenant. The effective tenant of a request is the tenant of the verified
+/// membership — never a subdomain, header or parameter.
+model Membership {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+  userId   String @db.Uuid
+  /// Optional campus restriction for multi-campus tenants. Null means the whole tenant.
+  campusId String? @db.Uuid
+
+  status        MembershipStatus @default(INVITED)
+  principalType PrincipalType
+  /// Set once the corresponding domain row exists (staff / student / guardian).
+  principalId   String? @db.Uuid
+  displayTitle  String?
+
+  startedOn    DateTime? @db.Date
+  endedOn      DateTime? @db.Date
+  invitedAt    DateTime?
+  acceptedAt   DateTime?
+  lastActiveAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant      Tenant                      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user        AppUser                     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  campus      Campus?                     @relation(fields: [campusId], references: [id], onDelete: SetNull)
+  roles       MembershipRole[]
+  grants      MembershipPermissionGrant[]
+  auditLogs   AuditLog[]
+
+  /// A person may be both a member of staff and a parent at the same school, and those are
+  /// genuinely different hats.
+  @@unique([tenantId, userId, principalType])
+  @@index([userId, status])
+  @@index([tenantId, status])
+  @@index([tenantId, principalType, principalId])
+  @@map("membership")
+}
+
+model MembershipRole {
+  membershipId String @db.Uuid
+  roleId       String @db.Uuid
+  grantedAt    DateTime @default(now())
+
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@id([membershipId, roleId])
+  @@index([roleId])
+  @@map("membership_role")
+}
+
+enum GrantEffect {
+  ALLOW
+  DENY
+}
+
+/// Per-person overrides, so a single sensitive capability can be given to one individual
+/// without minting a bespoke role — and can be explicitly taken away. DENY beats ALLOW.
+model MembershipPermissionGrant {
+  membershipId String      @db.Uuid
+  permissionId String      @db.Uuid
+  effect       GrantEffect
+  reason       String
+  grantedAt    DateTime    @default(now())
+  grantedBy    String      @db.Uuid
+  expiresAt    DateTime?
+
+  membership Membership @relation(fields: [membershipId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+
+  @@id([membershipId, permissionId])
+  @@map("membership_permission_grant")
+}
+
+enum SecuritySeverity {
+  INFO
+  NOTICE
+  WARNING
+  CRITICAL
+}
+
+/// Append-only. Failed sign-ins, password resets, MFA changes, privileged grants.
+/// A refused sign-in has no user and no tenant — and is exactly the row worth keeping.
+model SecurityEvent {
+  id            String           @id @default(uuid(7)) @db.Uuid
+  userId        String?          @db.Uuid
+  tenantId      String?          @db.Uuid
+  eventType     String
+  severity      SecuritySeverity @default(INFO)
+  occurredAt    DateTime         @default(now())
+  ipAddress     String?
+  userAgent     String?
+  detail        Json             @default("{}")
+  correlationId String?
+
+  user   AppUser? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  tenant Tenant?  @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+
+  @@index([userId, occurredAt])
+  @@index([tenantId, occurredAt])
+  @@index([eventType, occurredAt])
+  @@map("security_event")
+}
+
+// =====================================================================================
+// Audit
+// =====================================================================================
+
+/// Append-only record of who did what, to which record, when, and why.
+/// Written in the same transaction as the change it describes, so the two commit or roll
+/// back together. An audit trail that can disagree with its data is not evidence.
+model AuditLog {
+  id                String   @id @default(uuid(7)) @db.Uuid
+  tenantId          String?  @db.Uuid
+  actorUserId       String?  @db.Uuid
+  actorMembershipId String?  @db.Uuid
+
+  /// MODULE_NOUN_VERB, past tense: ACADEMIC_YEAR_ACTIVATED, GRADE_AMENDED.
+  action       String
+  resourceType String
+  resourceId   String? @db.Uuid
+  /// The human-facing reference where one exists, so an auditor can search for what they
+  /// actually have in front of them rather than a uuid.
+  resourceRef  String?
+
+  occurredAt  DateTime @default(now())
+  /// Required for high-risk actions. Six months later, "who closed it" is far less useful
+  /// than "and why".
+  reason      String?
+  beforeValue Json?
+  afterValue  Json?
+
+  ipAddress     String?
+  userAgent     String?
+  correlationId String?
+
+  tenant     Tenant?     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  actor      AppUser?    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  membership Membership? @relation(fields: [actorMembershipId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, occurredAt])
+  @@index([actorUserId, occurredAt])
+  @@index([resourceType, resourceId, occurredAt])
+  @@index([action, occurredAt])
+  @@map("audit_log")
+}
+
+// =====================================================================================
+// School structure
+//
+// Nothing here encodes Ghana. An academic year is a named date range with ordered terms
+// inside it — a Ghanaian three-term year, an English three-term year and a two-semester
+// international calendar are the same shape, differing only in rows.
+// =====================================================================================
+
+enum CampusStatus {
+  ACTIVE
+  INACTIVE
+  CLOSED
+}
+
+model Campus {
+  id       String       @id @default(uuid(7)) @db.Uuid
+  tenantId String       @db.Uuid
+  code     String
+  name     String
+  /// Exactly one per tenant. Single-campus schools get one and never think about it again.
+  isMain   Boolean      @default(false)
+  status   CampusStatus @default(ACTIVE)
+
+  addressLine1 String?
+  addressLine2 String?
+  city         String?
+  region       String?
+  postalCode   String?
+  countryCode  String? @db.Char(2)
+  phoneE164    String?
+  email        String?
+  /// A campus in another country keeps its own; otherwise it inherits the tenant's.
+  timezone     String?
+
+  openedOn DateTime? @db.Date
+  closedOn DateTime? @db.Date
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  memberships Membership[]
+  students    Student[]
+  enrolments  Enrolment[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+  @@map("campus")
+}
+
+/// One row per tenant. logoPath is a storage path, never a URL: the bucket is private and
+/// access is granted by a short-lived signed URL at render time.
+model Branding {
+  tenantId String @id @db.Uuid
+
+  motto         String?
+  logoPath      String?
+  logoUpdatedAt DateTime?
+  /// Constrained to accessible usage rather than rejected — see src/lib/brand-color.ts.
+  primaryColor  String?
+  accentColor   String?
+
+  reportCardHeader   String?
+  receiptHeader      String?
+  invoiceHeader      String?
+  documentFooter     String?
+  headSignatureName  String?
+  headSignatureTitle String?
+  website            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@map("branding")
+}
+
+/// PLANNED -> ACTIVE -> CLOSED. CLOSED is terminal: reopening would retroactively change
+/// what an already-issued report card means.
+enum CalendarStatus {
+  PLANNED
+  ACTIVE
+  CLOSED
+}
+
+model AcademicYear {
+  id       String         @id @default(uuid(7)) @db.Uuid
+  tenantId String         @db.Uuid
+  code     String
+  name     String
+  startsOn DateTime       @db.Date
+  endsOn   DateTime       @db.Date
+  status   CalendarStatus @default(PLANNED)
+  /// The year new work defaults to. At most one per tenant.
+  isCurrent Boolean       @default(false)
+
+  closedAt DateTime?
+  closedBy String?   @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  terms  Term[]
+  enrolments Enrolment[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, code])
+  @@index([tenantId, status])
+  @@map("academic_year")
+}
+
+model Term {
+  id             String         @id @default(uuid(7)) @db.Uuid
+  tenantId       String         @db.Uuid
+  academicYearId String         @db.Uuid
+  /// Orders terms within their year; what reporting joins on. `name` is what a school
+  /// calls it, which is how one tenant uses "First Term" and another "Semester 1".
+  sequence       Int
+  code           String
+  name           String
+  startsOn       DateTime       @db.Date
+  endsOn         DateTime       @db.Date
+  status         CalendarStatus @default(PLANNED)
+  isCurrent      Boolean        @default(false)
+  /// Drives the "results overdue" signal.
+  reportsDueOn   DateTime?      @db.Date
+
+  closedAt DateTime?
+  closedBy String?   @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [academicYearId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  enrolments   Enrolment[]
+
+  @@unique([id, tenantId])
+  @@unique([academicYearId, sequence])
+  @@unique([academicYearId, code])
+  @@index([tenantId, status])
+  @@map("term")
+}
+
+// =====================================================================================
+// Students and guardians
+//
+// A student belongs to one school (tenant). A guardian may have children at multiple schools,
+// which is why guardians are separate from students and linked through relationships.
+// =====================================================================================
+
+enum StudentStatus {
+  PROSPECTIVE
+  ENROLLED
+  ACTIVE
+  SUSPENDED
+  WITHDRAWN
+  GRADUATED
+  DECEASED
+}
+
+enum Gender {
+  MALE
+  FEMALE
+  OTHER
+  PREFER_NOT_TO_SAY
+}
+
+model Student {
+  id       String        @id @default(uuid(7)) @db.Uuid
+  tenantId String        @db.Uuid
+  /// Human-facing reference: STU-2026-000123
+  reference String
+  campusId String        @db.Uuid
+
+  /// Personal information
+  firstName      String
+  lastName       String
+  preferredName  String?
+  dateOfBirth    DateTime      @db.Date
+  gender         Gender
+  nationality    String?       @db.Char(2)
+  /// Ghana-specific: Primary school leaving exam results
+  beceRawScore   Int?
+  beceAggregate  Int?
+  beceYear       Int?
+
+  /// Contact information
+  phoneE164      String?
+  email          String?
+  addressLine1   String?
+  addressLine2   String?
+  city           String?
+  region         String?
+  postalCode     String?
+
+  /// Medical and special needs
+  bloodType      String?
+  medicalNotes   String?
+  allergies      String?
+  specialNeeds   String?
+
+  /// Academic information
+  admissionDate  DateTime?     @db.Date
+  admissionNumber String?
+  previousSchool String?
+
+  /// Status tracking
+  status         StudentStatus @default(PROSPECTIVE)
+  enrollmentDate DateTime?     @db.Date
+  withdrawalDate DateTime?     @db.Date
+  withdrawalReason String?
+  graduationDate DateTime?     @db.Date
+
+  /// System fields
+  photoPath      String?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  tenant   Tenant               @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  campus   Campus               @relation(fields: [campusId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  guardianships GuardianRelationship[]
+  enrollments Enrolment[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, reference])
+  @@index([tenantId, status])
+  @@index([campusId, status])
+  @@index([lastName, firstName])
+  @@map("student")
+}
+
+enum GuardianRelationshipType {
+  FATHER
+  MOTHER
+  GRANDFATHER
+  GRANDMOTHER
+  UNCLE
+  AUNT
+  LEGAL_GUARDIAN
+  SPONSOR
+  OTHER
+}
+
+model Guardian {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+
+  /// Personal information
+  firstName     String
+  lastName      String
+  preferredName String?
+  dateOfBirth   DateTime?     @db.Date
+  gender        Gender?
+  nationality   String?       @db.Char(2)
+
+  /// Contact information
+  phoneE164     String
+  phoneE1642    String?       // Alternate phone
+  email         String?
+  addressLine1  String?
+  addressLine2  String?
+  city          String?
+  region        String?
+  postalCode    String?
+
+  /// Occupation and employment
+  occupation    String?
+  employer      String?
+  workPhone     String?
+
+  /// Identification
+  nationalId    String?       // Ghana Card or other national ID
+  nationalIdType String?      // GHANA_CARD, PASSPORT, etc.
+
+  /// System fields
+  photoPath     String?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  tenant      Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  relationships GuardianRelationship[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, lastName, firstName])
+  @@map("guardian")
+}
+
+model GuardianRelationship {
+  id         String                    @id @default(uuid(7)) @db.Uuid
+  tenantId   String                    @db.Uuid
+  studentId  String                    @db.Uuid
+  guardianId String                    @db.Uuid
+
+  relationshipType GuardianRelationshipType
+  isPrimary         Boolean             @default(false)
+  isEmergency       Boolean             @default(false)
+  canPickUp         Boolean             @default(true)
+
+  /// Financial responsibility
+  paysFees          Boolean             @default(false)
+  feePercentage     Int?                // Percentage of fees this guardian pays
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  student  Student   @relation(fields: [studentId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  guardian Guardian  @relation(fields: [guardianId, tenantId], references: [id, tenantId], onDelete: Cascade)
+
+  @@unique([id, tenantId])
+  @@unique([studentId, guardianId])
+  @@index([tenantId, studentId])
+  @@index([tenantId, guardianId])
+  @@map("guardian_relationship")
+}
+
+// =====================================================================================
+// Enrolment
+//
+// Links students to academic years and terms. A student may be enrolled in multiple
+// terms across years (e.g., continuing education). The enrolment carries the student's
+// class assignment and academic standing for that term.
+// =====================================================================================
+
+enum EnrolmentStatus {
+  PENDING
+  ACTIVE
+  COMPLETED
+  WITHDRAWN
+  SUSPENDED
+}
+
+model Enrolment {
+  id             String          @id @default(uuid(7)) @db.Uuid
+  tenantId       String          @db.Uuid
+  studentId      String          @db.Uuid
+  academicYearId String          @db.Uuid
+  termId         String          @db.Uuid
+  campusId       String          @db.Uuid
+
+  /// Class assignment
+  classId        String?         @db.Uuid
+  gradeLevel     String?         // JHS1, JHS2, JHS3, SHS1, etc.
+  section        String?         // A, B, C, etc.
+
+  /// Academic standing
+  status         EnrolmentStatus @default(PENDING)
+  enrolmentDate  DateTime        @db.Date
+  completionDate DateTime?       @db.Date
+
+  /// Academic performance
+  gpa            Decimal?        @db.Decimal(4, 2)
+  classRank      Int?
+  totalStudents  Int?
+
+  /// Attendance summary
+  daysPresent    Int?
+  daysAbsent     Int?
+  daysLate       Int?
+
+  /// Fees and financials
+  feesOwed       Decimal?        @db.Decimal(19, 4)
+  feesPaid       Decimal?        @db.Decimal(19, 4)
+  currency       String          @default("GHS") @db.Char(3)
+
+  /// Notes
+  remarks        String?
+
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  student      Student      @relation(fields: [studentId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [academicYearId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  term         Term         @relation(fields: [termId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  campus       Campus       @relation(fields: [campusId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([id, tenantId])
+  @@unique([studentId, termId])
+  @@index([tenantId, academicYearId, termId])
+  @@index([tenantId, studentId])
+  @@index([tenantId, classId])
+  @@index([tenantId, status])
+  @@map("enrolment")
+}

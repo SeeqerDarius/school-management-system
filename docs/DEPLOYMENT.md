@@ -1,260 +1,285 @@
 # Deployment
 
-> **What this is for:** getting the Sankofa School Platform running in an environment other than
-> a laptop. **Who reads it:** whoever is doing that, and whoever has to undo it at 2am.
+> **What this is for:** getting this product into production, and back out again when something
+> goes wrong. Read the rollback section *before* you need it.
 
-> **Status: nothing is deployed.** No Vercel project, no container host, no database, no Firebase
-> project. This document describes what deployment *requires* and how to perform it. Every
-> instruction below is written from the code as it stands, but **none of it has been executed**,
-> and the container image has never been built — Docker was not available on the machine this was
-> developed on. Treat the first run of each step as the step being tested for the first time.
+There is one deployable unit: a Next.js application on Vercel, talking to PostgreSQL on Supabase.
+That is the whole topology. An earlier design had a second Java service; why it was retired is in
+[ADR 0010](adr/0010-nextjs-fullstack-on-vercel.md), and why the database moved from Neon to
+Supabase is in [ADR 0011](adr/0011-supabase-as-the-postgresql-host.md).
+
+Supabase is a larger surface than Neon was. It ships an internet-facing REST API over your tables
+whether you use it or not, so §1 below is not optional setup — it is the difference between a
+private database and a public one.
 
 ---
 
-## 1. The shape of a deployment
+## Environments
 
-Three pieces, and they cannot all live on Vercel.
+Three, and they share nothing.
 
-```mermaid
-flowchart LR
-    U["Browser"] --> W["apps/web<br/>Next.js on Vercel"]
-    W -->|"server-to-server<br/>session bearer token"| A["services/core-api<br/>Spring Boot container"]
-    A --> P[("PostgreSQL 16+<br/>managed")]
-    A --> F["Firebase<br/>Auth · Storage"]
-    U -->|"sign-in only"| F
+| Environment | Where | Database |
+| --- | --- | --- |
+| Development | Your machine | Local PostgreSQL 17, or your own Supabase project |
+| Preview | Vercel, one per pull request | A **separate** Supabase project, **never** production |
+| Production | Vercel, from `main` | The production Supabase project |
+
+> Neon gave a database branch per pull request for nothing. Supabase does not: branching is a paid
+> feature and the free plan has no per-pull-request equivalent. So preview points at one long-lived
+> throwaway project shared by every open pull request, and that project is **seeded**, never
+> restored from production.
+
+**A credential is never shared across environments.** A preview deployment is built from whatever
+is in a pull request, and a pull request can come from anywhere. If preview holds a production
+credential, then a preview compromise is a production compromise, and the blast radius of a
+carelessly reviewed branch is every school's data.
+
+Preview deployments must never point at production data for the same reason: a preview is a place
+people click things to see what happens.
+
+---
+
+## First deployment
+
+### 1. The database
+
+Create a Supabase project. **Choose the region before you create it** — it is fixed for the life of
+the project, and the pooler hostname embeds it.
+
+The database region is the immutable one, so it wins: set `regions` in `vercel.json` to the Vercel
+region in the *same* AWS region as the project, rather than moving the database. Today that is
+`eu-west-1` (Ireland) and `dub1`. A function talking to a database one region away pays that hop
+on every query, and a single page render makes several in sequence — session, memberships,
+permissions, then the page's own reads.
+
+From **Connect → ORMs → Prisma**, copy both strings:
+
+- the **transaction** pooler, port 6543 → `DATABASE_URL`
+- the **session** pooler, port 5432 → `DIRECT_URL`
+
+They are not interchangeable. The application runs in serverless functions that open and close
+connections constantly, which exhausts the connection limit without a pooler in front; migrations
+issue statements a transaction pooler cannot carry.
+
+Copy them rather than composing them. The pooler hostname is not derivable from the region — newer
+projects land on `aws-1-<region>`, older ones on `aws-0-<region>` — and the `db.<project-ref>.supabase.co`
+host you may find elsewhere is **IPv6-only** unless the project buys the IPv4 add-on. From an
+IPv4-only network, which covers most connections in Ghana and every GitHub-hosted Actions runner,
+migrations against that host fail with Prisma `P1001` and the message says nothing about
+addressing. Every flag on those URLs is explained in `.env.example`; `pgbouncer=true` on the 6543
+string is not optional.
+
+#### Check what the Data API can currently see
+
+Supabase serves schema `public` over PostgREST at `https://<project-ref>.supabase.co/rest/v1/`
+using the project's publishable key — which is public by design. Whether your tables are readable
+from the internet depends on a toggle set when the project was created, and it is not visible in
+the catalog. Run this in the SQL editor **before** the first deploy:
+
+```sql
+select defaclrole::regrole::text                      as granting_role,
+       (aclexplode(defaclacl)).grantee::regrole::text as grantee,
+       (aclexplode(defaclacl)).privilege_type
+from pg_default_acl
+where defaclnamespace = 'public'::regnamespace
+  and defaclobjtype = 'r'
+order by 1, 2, 3;
 ```
 
-| Piece | Runs on | Why not Vercel |
-|---|---|---|
-| `apps/web` | **Vercel** | — it is a Next.js app, this is the happy path |
-| `services/core-api` | **Any OCI host** — Cloud Run, Railway, Fly.io, Vercel container runtime | Vercel's Node runtime cannot run a JVM. The container runtime can, but needs a paid plan |
-| PostgreSQL | **Managed** — Neon, Supabase, Cloud SQL | Vercel does not host PostgreSQL |
-| Firebase Auth, Storage | **Google Cloud** | — |
+If the row for `granting_role = postgres`, `grantee = anon` lists SELECT/INSERT/UPDATE/DELETE, then
+every table Prisma creates would have been world-readable. Migration
+`20260919092000_data_api_lockdown` closes that and is safe to apply either way — but you should
+know which state you were in, because it tells you whether anything was ever exposed.
 
-The image is deliberately host-agnostic: plain OCI, no platform-specific base or build hook. Its
-only contract with the host is *listen on `$PORT`* and *report readiness at
-`/actuator/health/readiness`*.
+The migration in `prisma/migrations/20260919091000_calendar_and_role_constraints` creates the
+`btree_gist` extension in the `extensions` schema. The `postgres` role can do this unaided on
+Supabase — no dashboard click, no superuser.
 
----
+### 2. The project
 
-## 2. Prerequisites, in order
+Import the repository into Vercel. The settings in `vercel.json` are already correct — framework
+`nextjs`, `npm ci` to install, `npm run build` to build, region `dub1`.
 
-Each step depends on the one before it. Doing them out of order wastes time.
+`dub1` is Dublin, `eu-west-1`, which is where the Supabase project lives. Co-location beats
+proximity to the user here: the Ghana-to-edge hop is paid once per request, while the
+function-to-database hop is paid several times in sequence within it. `lhr1` (London) is marginally
+better connected to West Africa, and that is the smaller number.
 
-### 2.1 PostgreSQL — and the part that is easy to get wrong
+Static assets do not depend on this setting at all — they are served from Vercel's global edge
+network regardless. `regions` only places the serverless functions.
 
-Provision PostgreSQL 16 or later. Then **create two roles**, because the application and the
-migrations must not share one:
+**If the database ever moves, move this with it.** The two being in different AWS regions is a
+silent tax on every page, not an error anyone will see.
+
+### 3. Environment variables
+
+Set these in Vercel for **Production** and **Preview** separately.
+
+| Variable | Production | Preview |
+| --- | --- | --- |
+| `DATABASE_URL` | Production project, Supavisor **transaction** mode (`:6543`) with `?pgbouncer=true&connection_limit=1&pool_timeout=20&connect_timeout=15&sslmode=require` | The preview project, same shape |
+| `DIRECT_URL` | Production project, Supavisor **session** mode (`:5432`), no `pgbouncer` flag | The preview project, session mode |
+| `NEXTAUTH_SECRET` | `openssl rand -base64 48` | A *different* value |
+| `NEXTAUTH_URL` | Your canonical domain | Leave unset — Vercel supplies its own URL |
+| `NEXT_PUBLIC_SITE_URL` | Your canonical domain | Leave unset |
+
+`NEXT_PUBLIC_*` is inlined into the JavaScript bundle and served to every visitor. Nothing secret
+goes behind that prefix, ever. CI fails the build if anything tries.
+
+There are no `NEXT_PUBLIC_SUPABASE_*` variables — no project URL, no publishable key — and there
+never will be. This product does not use supabase-js, PostgREST, Supabase Auth or Supabase Storage;
+Prisma speaks to PostgreSQL and nothing else does. Publishing a publishable key would hand the
+internet a second door into the same tables.
+
+(Those names are written with a wildcard on purpose. The secret scan in CI matches the literal
+variable name and cannot tell a warning from an exposure, so spelling one out in full here would
+fail the build. Reword the prose; do not add an exclusion to the scan.)
+
+### 4. Migrate
+
+Migrations do **not** run as part of the Vercel build, and that is deliberate. A build runs on every
+preview, from every branch; a schema change must not be applied by whoever opened a pull request.
+
+Apply them from your machine, with `DIRECT_URL` pointed at production:
 
 ```bash
-psql "$SUPERUSER_URL" \
-  -v migrate_password="'<generated>'" \
-  -v app_password="'<generated>'" \
-  -f database/bootstrap/00_roles.sql
+npm run db:deploy
 ```
 
-| Role | Attributes | Used by |
-|---|---|---|
-| `sankofa_migrate` | owns the schemas, **BYPASSRLS** | Flyway, and system jobs that legitimately span tenants |
-| `sankofa_app` | plain login role — **no ownership, no BYPASSRLS, not superuser** | the running application |
-
-**This split is the whole basis of tenant isolation.** A superuser — and any role with
-`BYPASSRLS` — ignores Row Level Security unconditionally. Point `spring.datasource` at the
-migration role and every policy in the schema becomes inert: nothing errors, nothing looks
-broken, and every school can read every other school's records. `00_roles.sql` re-asserts the
-role attributes on every run and refuses rather than passing silently, which is the one
-safeguard against this being discovered later rather than sooner.
-
-The `btree_gist` extension is required (`V0010` installs it; it is a trusted extension, so the
-schema owner can do this without superuser on PostgreSQL 13+). Confirm your provider permits it —
-Neon and Supabase do; some locked-down managed offerings do not.
-
-### 2.2 Firebase
-
-Create **one project per environment**. Sharing a project across staging and production means a
-staging compromise is a production compromise.
-
-1. Enable **Authentication** → Email/Password.
-2. Enable **Storage**, and leave the bucket **private**. Objects are served through short-lived
-   signed URLs only (§68). A public bucket here exposes student photographs and staff documents.
-3. Generate a service account for the API, or preferably use Application Default Credentials so
-   there is no key file to leak or rotate.
-4. Note the client config values for the web tier — these are public by design; they identify the
-   project and authorise nothing.
-
-**Until this exists, nobody can sign in**, and a deployed application will render the sign-in page
-and stop there.
-
-### 2.3 Secrets
-
-Every environment gets its own. See `.env.example` for the complete list with dummy values.
-
-| Where | Variables |
-|---|---|
-| Container host | `DB_URL`, `DB_APP_USER`, `DB_APP_PASSWORD`, `DB_MIGRATE_USER`, `DB_MIGRATE_PASSWORD`, `FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `PORT` |
-| Vercel | `CORE_API_BASE_URL`, `SESSION_SECRET`, `NEXT_PUBLIC_FIREBASE_*` |
-
-`SESSION_SECRET` is 32+ random bytes, different per environment:
+Then seed the permission catalogue and the system roles. The demo school is skipped automatically
+when `NODE_ENV=production`:
 
 ```bash
-openssl rand -base64 48
+NODE_ENV=production npm run db:seed
 ```
 
-Nothing secret may go behind `NEXT_PUBLIC_`. That prefix inlines the value into the client
-bundle, where it is public to every visitor. CI fails the build if it finds one (see the
-secret-scan job).
+The seed is idempotent — CI proves it by running it twice — so this is safe to repeat after a
+release that adds permissions.
 
----
-
-## 3. Deploying the API
+Then confirm the Data API really is shut, because this is the step nobody notices is missing:
 
 ```bash
-docker build -t sankofa-core-api:$(git rev-parse --short HEAD) services/core-api
+npm run test:db
 ```
 
-The build resolves dependencies in their own layer before copying source, so a code-only change
-rebuilds in seconds. Tests are **not** run in the image build — they run in CI against a real
-PostgreSQL as a non-superuser role, and an image built from a commit CI has not passed should not
-be deployed at all.
+`tests/db/data-api-lockdown.test.ts` asserts that no table in `public` lacks row-level security,
+that `anon` and `authenticated` hold no privileges on any of them, and that `btree_gist` is not in
+`public`. Against Supabase all three are meaningful; against plain PostgreSQL the middle one passes
+vacuously because the roles do not exist.
 
-Runtime requirements the host must satisfy:
-
-- `PORT` honoured (defaults to 8080)
-- Readiness probe on `/actuator/health/readiness`, with a start period of at least 45 seconds —
-  Flyway runs at boot and a cold JVM is not fast
-- Outbound network to PostgreSQL and to Google's token-signing endpoints
-- **Ingress only from the load balancer.** The rate limiter trusts `X-Forwarded-For` because
-  Spring is configured to; that is safe only while nothing can reach the container directly
-- Memory: 512 MiB is the floor, 1 GiB is comfortable. `MaxRAMPercentage=75` adapts the heap to
-  whatever the platform actually granted
-
-### Migrations
-
-Flyway runs automatically at start-up, as `sankofa_migrate`. That is convenient and correct for a
-single instance; it is **not** safe when several instances start simultaneously against an empty
-database, because they will race. Before scaling beyond one instance, move migration to a
-pre-deploy job and set `spring.flyway.enabled=false` on the application itself.
-
-Migrations must be **backward compatible** with the currently running version, because during a
-rolling deploy both versions are live at once. Adding a column is safe; dropping or renaming one
-is not. Use expand/contract: add, deploy, backfill, switch reads, then remove in a later release.
-
----
-
-## 4. Deploying the web tier
-
-On Vercel, set the project's **Root Directory to `apps/web`**. The repository is an npm workspace
-and the build must run from the workspace root; `apps/web/vercel.json` supplies the install and
-build commands.
-
-`regions: ["lhr1"]` puts the functions in London, the lowest-latency Vercel region for Ghana —
-Vercel has no African region. Region pinning is a paid-plan feature; on hobby it is ignored, which
-costs latency but nothing else.
-
-Every tenant-scoped route is `force-dynamic` (see `app/(school)/layout.tsx`), so nothing is
-prerendered and nothing is cached at the edge. This is deliberate: a cached page served to the
-wrong school is the same disclosure the entire tenancy model exists to prevent.
-
----
-
-## 5. Order of operations
-
-Ordering matters on the first deploy and on every deploy after it.
-
-**First deploy**
-
-1. Provision PostgreSQL → run `00_roles.sql` → verify `sankofa_app` has neither `SUPERUSER` nor
-   `BYPASSRLS`
-2. Create the Firebase project
-3. Set secrets on both hosts
-4. Deploy the API — Flyway creates the schema
-5. Verify `/actuator/health/readiness` returns `UP`
-6. Deploy the web tier with `CORE_API_BASE_URL` pointing at the API
-7. Provision the first tenant and invite the first administrator
-8. Run the smoke test below
-
-**Subsequent deploys**
-
-1. CI green on the commit
-2. API first, web second — the web tier tolerates an API that is ahead of it far better than an
-   API that is behind it
-3. Watch readiness and error rates for the first fifteen minutes
-
----
-
-## 6. Production smoke test
-
-Vercel reporting "Ready" means the build succeeded. It does not mean the system works (§198).
-Run this against the deployed environment:
+You can also check from outside, with no credentials at all — this should return a permission
+error, not data:
 
 ```bash
-# 1. The API is up and can reach its database
-curl -fsS "$API/actuator/health/readiness"        # expect {"status":"UP"}
-
-# 2. An unauthenticated request to a protected endpoint is refused
-curl -s -o /dev/null -w '%{http_code}\n' "$API/api/v1/academic-years"   # expect 401
-
-# 3. A forged session token is refused
-curl -s -o /dev/null -w '%{http_code}\n' \
-     -H 'Authorization: Bearer AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA' \
-     "$API/api/v1/academic-years"                 # expect 401
-
-# 4. Errors carry no stack trace, no SQL, no class names
-curl -s "$API/api/v1/academic-years" | grep -Ei 'java\.|springframework|Exception' \
-  && echo 'FAIL: internals leaked' || echo 'OK: no internals in error body'
-
-# 5. Security headers are present
-curl -sI "$API/actuator/health" | grep -Ei 'strict-transport|content-type-options|frame-options'
+curl -s "https://<project-ref>.supabase.co/rest/v1/app_user?select=id&limit=1" -H "apikey: <publishable key>"
 ```
 
-Then, through the browser:
+### 5. The first real account
 
-| Check | Expected |
-|---|---|
-| Sign in as the seeded administrator | Lands on the school chooser, not on a school |
-| Choose the school | Academic calendar loads |
-| Create an academic year | Appears as **Planned** |
-| Add two terms with overlapping dates | Second one refused with a message naming the conflict |
-| Activate the year, then a term | Both become **Active** |
-| Close the year with terms still open | Refused |
-| Sign in as a teacher | Calendar returns **403**, not an empty page |
-| Query `audit.audit_log` | Entries for each action, with actor and reason |
+There is no self-service registration, so the first administrator has to be created deliberately.
+Do it with a one-off script against production using the same bcrypt work factor as
+`prisma/seed.ts`, or by running the seed with `ALLOW_PRODUCTION_SEED=true` and
+`SEED_ADMIN_EMAIL` set, then immediately changing the password.
 
-The last two matter most. A calendar that renders empty for a teacher instead of refusing would
-mean the permission check is not running, and an empty audit log would mean the transaction
-boundary is wrong.
+**Never insert a user row by hand with a password hash from somewhere else.** A hash copied from a
+development database is a development password in production.
 
 ---
 
-## 7. Rollback
+## Every deployment after that
 
-| Situation | Action |
-|---|---|
-| Web tier broken | Vercel → Instant Rollback to the previous deployment |
-| API broken, schema unchanged | Redeploy the previous image tag |
-| API broken, schema changed | **Do not roll the database back.** Roll the application forward or back to a version compatible with the current schema. Restoring a database loses every transaction since the snapshot |
-| Migration failed mid-flight | Flyway marks it failed and refuses to continue. Repair deliberately — see `RUNBOOK.md` (not yet written) |
+1. Open a pull request. CI runs typecheck, lint, the fast tests, a production build, and the
+   database job — migrations applied to an empty PostgreSQL, drift check, seed run twice, tenant
+   isolation and constraint suites.
+2. Vercel builds a preview.
+3. Merge to `main`. Vercel deploys production.
+4. **If the release includes a migration, apply it before the code that needs it** — see below.
 
-This is the reason migrations must be backward compatible: it makes an application rollback
-possible without a database rollback.
+### Migrations and deployment order
+
+A migration and the code that depends on it deploy at different moments, and for a few seconds both
+old and new code are live. So migrations are written to be **backwards compatible with the code
+currently running**:
+
+- Adding a nullable column, a table or an index: apply any time.
+- Adding a required column: add it nullable, backfill, then make it required in a *later* release.
+- Removing a column: stop writing it, deploy, then remove it in a later release.
+- Renaming anything: add, backfill, switch reads, stop writing, remove. Five steps, not one.
+
+A migration that has been applied anywhere is never edited. Its checksum is recorded in every
+database that ran it, and changing the file breaks them all. CI enforces this on every pull
+request: modifying or deleting a file under `prisma/migrations/` fails the build. Correct a
+mistake by adding another migration.
 
 ---
 
-## 8. Not yet ready for production
+## Rolling back
 
-Stated plainly, because a deployment guide that implies readiness it does not have is worse than
-no guide.
+**Code rolls back. Data does not.** Read that again before deploying a destructive migration.
 
-| Gap | Consequence |
-|---|---|
-| **No Firebase project** | Nobody can sign in. The application is unusable |
-| **Rate limiting is per-instance and in-memory** | Correct for one instance. Behind a load balancer with three, the effective limit is three times the policy. Needs a shared store (Redis, or bucket4j over PostgreSQL) before scaling out |
-| **The API must be unreachable except through the proxy** | The rate limiter keys on the client address, which Spring derives from `X-Forwarded-For`. Expose the container port directly and an attacker forges that header, gets a fresh bucket per fabricated address, and bypasses the limiter entirely |
-| **The container image has never been built** | The Dockerfile is verified only as far as the layered-jar extraction and launcher layout, which were tested locally without Docker |
-| **Flyway runs at application start** | Unsafe above one instance |
-| **No backup or restore procedure has been exercised** | A backup never restored is not a backup (`BACKUP_RESTORE.md` is not yet written) |
-| **No staging environment** | Nothing catches a production-only problem before production does |
-| **CodeQL results are not published** | Requires code scanning to be enabled; the gate is currently soft |
-| **Only one business module exists** | See `IMPLEMENTATION_STATUS.md` |
+### Rolling back code
 
-See [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) — not yet written — for the per-release gate.
+In Vercel: **Deployments → the last good one → Promote to Production**. It is immediate and it is
+the first thing to do in an incident. Do not try to fix forward under pressure.
+
+### Rolling back a migration
+
+There is no down migration, on purpose. A generated rollback that has never been run is a rollback
+that does not work, and discovering that at three in the morning with a broken database is worse
+than having no rollback at all.
+
+So:
+
+1. **Promote the previous deployment.** If the migration was backwards compatible — and it should
+   have been — the old code runs fine against the new schema, and you have stopped the bleeding.
+2. **Write a forward migration** that undoes what is wrong, with a clear head, reviewed.
+3. **Restoring lost data depends on a plan you may not be on.** Supabase's point-in-time recovery
+   is a paid add-on and the free plan has no scheduled backups at all. Neon gave this away; Supabase
+   does not.
+
+   **Confirm what this project actually has, today, before you need it** — Project Settings →
+   Database → Backups. If the answer is "nothing", then a destructive migration against production
+   is unrecoverable, and that fact should change how the migration is reviewed rather than being
+   discovered at three in the morning.
+
+   This is why `npm run db:reset` and `npm run db:migrate` now refuse any host that is not
+   localhost (`scripts/guard-local-db.mjs`): both DROP and recreate, and against Supabase that
+   destroys the project's own `auth` and `storage` schemas as well, from which it does not
+   recover. It is also why destructive migrations go out on their own, never bundled with a
+   feature.
+
+[INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md) covers who to tell and when, including the statutory
+clock that starts when children's data is involved.
+
+---
+
+## Secrets
+
+- Rotate `NEXTAUTH_SECRET` and every session is invalidated at once. That is the intended emergency
+  control, not a side effect.
+- A leaked database URL means resetting the database password in Supabase (Project Settings →
+  Database) and updating both variables in Vercel. Rotating it invalidates both URLs at once,
+  because they differ only by port and role.
+- The publishable ("anon") key is public by design and is not a secret. It is also not harmless:
+  it is the credential the Data API accepts, which is exactly what migration
+  `20260919092000_data_api_lockdown` exists to make useless.
+- A credential committed to git is compromised the moment it is pushed, whatever the repository's
+  visibility. Rotate it; do not merely remove the file. CI's secret scan is a safety net, not a
+  reason to be casual.
+
+---
+
+## What is not set up yet
+
+Named here rather than assumed, because an operational gap you do not know about is worse than one
+you do.
+
+- **No error tracking.** Failures reach Vercel's function logs and nowhere else. Nobody is paged.
+- **No uptime monitoring.** You will learn about an outage from a school.
+- **No database backup.** Supabase's point-in-time recovery is a paid add-on and the free plan has
+  no scheduled backups, so unless this project is on a paid tier there is no recovery path from a
+  destructive migration and no independent export. This is a regression from Neon and it is the
+  single most important open item in `IMPLEMENTATION_STATUS.md` after tenant-policy RLS.
+- **No staging environment** distinct from preview.
+
+These are tracked in [IMPLEMENTATION_STATUS.md](../IMPLEMENTATION_STATUS.md).

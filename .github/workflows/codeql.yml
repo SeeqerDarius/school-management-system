@@ -1,8 +1,9 @@
 name: CodeQL
 
 # Static analysis for the vulnerability classes that review misses: injection, unsafe
-# deserialisation, path traversal, SSRF. Runs on every change to main and weekly, because a
-# new query can find a flaw in code that has not changed since the last scan.
+# deserialisation, path traversal, SSRF, and secrets reaching the client bundle. Runs on every
+# change to main and weekly, because a new query can find a flaw in code that has not changed
+# since the last scan.
 on:
   push:
     branches: [main]
@@ -29,22 +30,13 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - language: java-kotlin
-            build-mode: manual
+          - language: javascript-typescript
+            build-mode: none
           - language: actions
             build-mode: none
-          # javascript-typescript is added with apps/web, once there is source to scan.
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up JDK 25
-        if: matrix.language == 'java-kotlin'
-        uses: actions/setup-java@v4
-        with:
-          java-version: '25'
-          distribution: temurin
-          cache: maven
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
@@ -55,13 +47,6 @@ jobs:
           # system holding children's records and a financial ledger, the extra scan time is
           # not a meaningful cost.
           queries: security-extended
-
-      # Compile only. Tests start an embedded PostgreSQL, which CodeQL does not need to
-      # observe and which would triple the scan time.
-      - name: Build
-        if: matrix.language == 'java-kotlin'
-        working-directory: services/core-api
-        run: ./mvnw -B -ntp -DskipTests compile
 
       # The analysis itself runs and its findings appear in this job's log. Only the UPLOAD
       # fails, because publishing to the Security tab needs code scanning enabled on the

@@ -1,244 +1,180 @@
-# Implementation Status
+# Implementation status
 
-**Last updated:** 2026-09-19
-
-This file is the honest record of what exists. It is not a plan and not a wish list.
-
-A module is only marked at a level when that level is **demonstrably true** — `TESTED` means
-tests exist and pass, not that tests are intended. `COMPLETE` requires all sixteen points of the
-Definition of Done in [AGENTS.md](AGENTS.md). Screens existing is not `FUNCTIONAL`.
-
-## Status vocabulary
-
-| Status | Means |
-|---|---|
-| `NOT_STARTED` | No schema, no code |
-| `IN_PROGRESS` | Partially built; not usable end to end |
-| `FUNCTIONAL` | Works end to end for its primary path |
-| `TESTED` | Unit + integration tests exist and pass, including tenant isolation |
-| `SECURITY_REVIEWED` | Reviewed against the module's threat notes; findings resolved |
-| `DOCUMENTED` | Module documentation current and accurate |
-| `COMPLETE` | All sixteen Definition of Done points hold |
+> **What this is for:** the honest record of what exists, what does not, and what is known to be
+> weak. If a feature is not listed as built here, assume it is not built, whatever a document or a
+> comment elsewhere implies.
+>
+> Last reviewed: 2026-09-19, after the stack change recorded in
+> [ADR 0010](docs/adr/0010-nextjs-fullstack-on-vercel.md).
 
 ---
 
-## Honest summary
+## The short version
 
-The specification this was built from describes a system of roughly the scope of a commercial
-School ERP — a multi-person-year programme. What exists today is **the foundation, built properly
-rather than broadly**: tenancy, identity, authorization, and the verification harness the rest of
-the system depends on being correct.
+The foundation is built and tested: tenancy, identity, authorization, the academic calendar, and
+sign-in. Student, guardian and enrolment schemas plus a first student workflow are in progress and
+not yet released. Attendance, fees, accounting, HR and payroll are not built.
 
-### Verified as of this commit
-
-| | |
-|---|---|
-| Migrations | 10, applying cleanly from an empty database |
-| Tests | **199 passing** — 126 unit, 73 integration |
-| Backend build | `./mvnw clean verify` green on JDK 25 LTS / Spring Boot 3.5.16 |
-| Web build | `typecheck`, `lint` and `next build` all clean on Next 16.3.5 / React 19 |
-| RBAC | 142 permissions, 26 system roles, 360 grants, cross-validated code ↔ database |
-| Architecture rules | 12 ArchUnit rules enforcing module boundaries and money typing |
-| CI | Secret scan, backend build+test, web build, generated-file drift, append-only migrations, dependency review, CodeQL |
-
-One business module exists end to end — the **academic calendar** — and it is deliberately the
-reference pattern the rest copy: schema with RLS, domain state machine, repository with explicit
-tenant predicates, application service carrying the permission and the audit write, controller,
-and a test file covering isolation, the permission matrix, the state machine, the database
-constraints and the audit entries.
-
-### A note on the toolchain
-
-The project targets **Java 25 LTS**. It was originally built on 21; an automated upgrade agent
-bumped `java.version` to 25 mid-build, and rather than reverting it the combination was verified —
-the full suite passes on JDK 25 with Spring Boot 3.5.16. The only observed friction is a Mockito
-self-attachment warning, which is advisory and not a failure.
-
-That same agent auto-stashed uncommitted work when it switched branches; twelve files were
-recovered from `stash@{0}^3`. Nothing was lost, but it is the reason several commits landed in
-larger batches than intended.
-
-The isolation guarantee is the part worth trusting: tests connect as a **non-superuser** role,
-because a superuser bypasses Row Level Security unconditionally and would make every cross-tenant
-assertion pass vacuously. The catalogue sweep in `TenantIsolationIT` fails any future table that
-carries `tenant_id` without a forced policy, so the guarantee does not depend on anyone
-remembering to extend the test.
-
-### What does not exist
-
-**Almost every business module.** Students, admissions, attendance, timetabling, assessment,
-grading, fees, accounting, HR, payroll, library, inventory, procurement, assets, communications
-and E2EE messaging. The web application has exactly one screen.
-
-A human still cannot use this system, but the reason has changed: sign-in is built and tested,
-and what is missing is a **Firebase project** for it to verify tokens against.
+One known weakness matters more than the rest and is at the top of the list below.
 
 ---
 
-## Phase 0 — Foundation
+## Built
 
-| Item | Status | Evidence |
-|---|---|---|
-| Monorepo structure | `FUNCTIONAL` | npm workspaces: `apps/web`, `services/core-api`, `packages/*` |
-| Engineering conventions | `DOCUMENTED` | [AGENTS.md](AGENTS.md) — 12 prohibitions, 16-point DoD |
-| Architecture definition | `DOCUMENTED` | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) — invariants I-1..I-8 |
-| Module boundary enforcement | `TESTED` | `ModuleBoundaryTest`, 11 rules |
-| Java build | `FUNCTIONAL` | Maven Wrapper 3.3.4 / Maven 3.9.16 |
-| Flyway migrations | `TESTED` | 10 migrations apply from empty on every test run |
-| Embedded test database | `TESTED` | zonky PostgreSQL, non-superuser app role asserted |
-| Database bootstrap | `FUNCTIONAL` | `database/bootstrap/00_roles.sql`, re-asserts role attributes |
-| Environment template | `DOCUMENTED` | `.env.example`, dummy values only |
-| CI pipeline | `TESTED` | Observed green on GitHub: secret scan, backend, web, generated-file drift |
-| Firebase project | `NOT_STARTED` | No project provisioned, no rules written |
-| Container image | `FUNCTIONAL` | Dockerfile written; layered extraction and launcher layout verified locally. **Image never built — no Docker available** |
-| Deployment documentation | `DOCUMENTED` | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), including a production smoke test |
-| Release workflow | `FUNCTIONAL` | `.github/workflows/release.yml` — tag or manual only; publishes to GHCR, deploys nothing |
-| Vercel deployment | `NOT_STARTED` | No project linked. Nothing is deployed anywhere |
-
-## Phase 1 — Identity and tenancy
-
-| Item | Status | Evidence |
-|---|---|---|
-| Tenant registry schema | `FUNCTIONAL` | `platform.tenant`, RLS-protected |
-| RLS substrate | `TESTED` | `current_tenant_id()` raises 42501 when unbound |
-| Connection-level tenant binding | `TESTED` | `TenantAwareDataSourceIT`, 6 tests incl. pooled-connection clearing |
-| Cross-tenant isolation | `TESTED` | `TenantIsolationIT`, 10 tests |
-| RLS catalogue regression sweep | `TESTED` | Fails any table with `tenant_id` and no forced policy |
-| Permission catalogue | `TESTED` | `PermissionCatalogueIT`, code ↔ database both directions |
-| System role templates | `TESTED` | Segregation-of-duties asserted for payroll, journals, teacher, platform admin |
-| Permission enforcement | `TESTED` | `PermissionAspectTest`, 9 tests, allow **and** deny for each rule |
-| Session establishment | `TESTED` | `SessionApiIT`, 9 tests over real HTTP: sign in, choose school, act, sign out |
-| Session resolution | `TESTED` | `SessionResolver` + `identity.resolve_session`; covered by `SessionApiIT` |
-| Invitation-only sign-up | `TESTED` | A verified provider account with no invitation is refused, not provisioned |
-| Firebase token verification | `FUNCTIONAL` | `FirebaseIdentityTokenVerifier`; **exercised only through a stub — never against a live Firebase project** |
-| MFA enforcement | `IN_PROGRESS` | `mfa_required` is checked at sign-in and returns `MFA_REQUIRED`; **no enrolment flow, no test** |
-| Support access workflow | `IN_PROGRESS` | Schema only; no service, no UI, no audit wiring |
-| Outbox dispatch | `IN_PROGRESS` | Schema only; no poller |
-| Sign-in rate limiting | `TESTED` | `RateLimitIT` + `InMemoryRateLimiterTest`; **per-instance only** |
-| Subscription / entitlements | `NOT_STARTED` | — |
-
-## Phase 2 — School structure
-
-| Item | Status | Evidence |
-|---|---|---|
-| Academic year lifecycle | `TESTED` | `AcademicCalendarApiIT` — permissions, isolation, transitions, constraints, audit |
-| Term lifecycle | `TESTED` | Same suite; terms cannot outlive their year or overlap each other |
-| Calendar state machine | `TESTED` | `CalendarStatusTest` — every legal and illegal transition, exhaustively |
-| Audit log | `FUNCTIONAL` | `audit.audit_log`, append-only by trigger *and* by revoked privilege |
-| Academic calendar UI | `FUNCTIONAL` | Renders at desktop and phone width, light and dark; **happy path unverified in-browser** |
-| Campus and branding UI | `NOT_STARTED` | API exists; no screens yet |
-| Campus | `TESTED` | `SchoolSettingsApiIT` — first-campus-is-main, main cannot be closed, isolation, permissions |
-| Branding | `TESTED` | Colour constrained to accessible use (§94); logo by storage path, never URL |
-| Brand colour accessibility | `TESTED` | `BrandColorTest`, 47 tests incl. a full greyscale sweep of the contrast curve |
-
-## Phase 3 onward — business modules
-
-Every module below is `NOT_STARTED`. No schema, no service, no endpoint, no screen.
-
-Students · Guardians · Admissions · Enrolment & promotion · Attendance · Timetable ·
-Subjects & classes · Assessments · Grading & ranking · Report cards · Transcripts · Fees ·
-Invoicing · Payments · Receipts · Refunds · Accounting · Chart of accounts · Journals ·
-Fiscal periods · Tax engine · Financial reports · HR · Leave · Payroll · Payslips ·
-Library · Inventory · Procurement · Assets · Transport · Hostel · Health · Discipline ·
-Counselling · Documents · Notifications · Email · SMS · E2EE messaging · Analytics ·
-Platform Super Admin · PWA · Every portal except the one calendar screen
+| Area | What exists | Where |
+| --- | --- | --- |
+| Tenancy | Prisma client extension injecting `tenantId` into every query and create; throws on unhandled operations; four scoping categories including shared reference data | `src/server/tenant-scope.ts` |
+| Identity | NextAuth credentials provider, bcrypt (cost 12), constant-time failure path, no account enumeration, session revocation via `sessionsValidFrom` | `src/server/auth/options.ts` |
+| Authorization | 142 permissions, 26 system roles, 360 grants with segregation of duties; roles + direct grants, DENY applied last | `prisma/seed-data.ts`, `src/server/auth/permissions.ts` |
+| Sessions | Sign-in, school selection with server-side membership verification, sign-out | `src/app/(auth)/**`, `src/server/auth/session.ts` |
+| Academic calendar | Years and terms, PLANNED → ACTIVE → CLOSED, non-overlap, "current" selection, close-with-reason | `src/features/calendar/**` |
+| Audit trail | Append-only, written in the same transaction as the change it describes | `src/server/audit.ts` |
+| Database invariants | Ordering, non-overlap (exclusion constraints), one-current partial unique indexes, closure recorded, system role code uniqueness | `prisma/migrations/20260919091000_*` |
+| CI | Secret scan, typecheck, lint, unit tests, build, migrations against real PostgreSQL, drift check, idempotent-seed check, tenant isolation suite | `.github/workflows/ci.yml` |
+| Data API lockdown | Deny-all RLS on every table plus REVOKE from `anon`/`authenticated`, idempotent and portable to plain PostgreSQL | `prisma/migrations/20260919092000_data_api_lockdown` |
 
 ---
 
-## Known gaps in what *is* built
+## Known weaknesses
 
-Recorded here rather than left implicit, because an unrecorded gap becomes a surprise.
+### 1. Row-level security does not enforce tenancy — **highest priority** - IN PROGRESS
 
-1. **Firebase verification has never run against a real project**, and this now blocks more than
-   itself. The sign-in path is tested end to end, but only through `StubIdentityTokenVerifier`;
-   signature, audience, issuer and revocation checking are delegated to the Admin SDK and are
-   correct by construction, not by observation.
+**Status:** Migration drafted (`20260920000000_rls_tenant_isolation`) but not yet applied or
+validated against a disposable PostgreSQL database. Its `sankofa_app` role is created without
+login; an operator must provision login and a strong password through the deployment secret
+manager before the application can connect as that role.
 
-   The knock-on effect is that the **web-to-API seam cannot be exercised in a browser**. The
-   calendar UI has been verified rendering its layout, theming, responsive behaviour and error
-   state, but never its populated happy path — signing in requires a Firebase ID token that does
-   not exist. The API's own happy path is covered by the integration suite, so what is unproven
-   is specifically the join between the two tiers. Provisioning a Firebase project is the single
-   highest-value next step.
-2. **Rate limiting is per-instance and in-memory.** Sign-in is now throttled (§84), but each
-   process keeps its own buckets: behind a load balancer with three instances the effective
-   limit is three times the policy. It is a real weakening, not a rounding error, and it must be
-   replaced with a shared store (Redis, or bucket4j over PostgreSQL) before scaling past one
-   instance. It also assumes the API is **unreachable except through the trusted proxy** — expose
-   the container directly and a forged `X-Forwarded-For` earns a fresh bucket per fabricated
-   address, bypassing the limiter entirely while the dashboard still says one exists.
+RLS *is* enabled on every table as of migration `20260919092000_data_api_lockdown`, with no
+policies, which closes Supabase's Data API. That is worth having and it is **not** tenant
+isolation.
 
-   Only sign-in, membership switching and public endpoints are covered. §84 also calls for
-   limits on exports, messaging, SMS dispatch, payment initiation and file upload; those are
-   added as each module lands.
-3. **The outbox has no poller.** `platform.outbox` is written by nothing and drained by nothing,
-   so `ARCHITECTURE.md` §6's description of event dispatch is currently aspirational.
-4. **CodeQL results are not published, and its gate is currently soft.** The analysis runs and
-   its findings appear in the job log, but uploading to the Security tab requires code scanning
-   to be enabled — which for a private repository means GitHub Advanced Security. The analyze
-   step carries `continue-on-error: true` so CI is not permanently red over a billing
-   entitlement. **This weakens the gate**: a genuine CodeQL failure is tolerated while that line
-   is there. Remove it as soon as code scanning is enabled.
-5. **ADRs 0003, 0004, 0005, 0006, 0010, 0011, 0012 are referenced by `ARCHITECTURE.md` §8 but
-   not written.** Likewise `docs/SECURITY.md`, `DISASTER_RECOVERY.md`, `BACKUP_RESTORE.md`,
-   `ACCESSIBILITY.md`, `RELEASE_CHECKLIST.md`, `METRICS_CATALOG.md`. Those links are dead.
-6. **JaCoCo's coverage floor is 0.00.** It is wired but enforces nothing until there is enough
-   code for a floor to be meaningful.
-7. **`LoginPathProbeIT` is a diagnostic, not a product test.** It was written to find the
-   bootstrapping bug below and is kept because it would catch a recurrence, but it asserts
-   plumbing rather than behaviour.
+Prisma connects as `postgres`, which carries `BYPASSRLS`. Every policy is skipped for the
+application's own connection, so tenant isolation still rests entirely on the client extension in
+`src/server/tenant-scope.ts` — which lives in the application, and which a `$queryRaw` bypasses.
+The previous Java implementation had real RLS with a non-superuser role and proved it in tests.
+That was lost in the stack change and is not being presented as anything else. See ADR 0010.
 
-### Three real defects found by testing, and what they were
+**Progress:**
+- ⏳ Drafted migration with per-tenant RLS policies for all tenant-owned tables
+- ⏳ Drafted sankofa_app role without BYPASSRLS or an embedded password
+- ⏳ Added withRlsTransaction helper using a bound tenant value for the session variable
+- ⏳ Drafted RLS test suite; database execution remains outstanding
+- ⏳ Migration needs to be applied (requires local PostgreSQL for development)
+- ⏳ DATABASE_URL needs to switch to sankofa_app role
+- ⏳ Existing queries need to move into transactions for session variable support
 
-Recorded because each was invisible until something executed it, and each would have reached
-production looking fine:
+**What remains:**
 
-- **A `FOR ALL` policy's `USING` clause is evaluated on `SELECT` too.** Mine called the *raising*
-  tenant accessor, so every membership lookup on the sign-in path — which is unscoped by
-  definition — threw SQLSTATE 42501 and surfaced as an opaque 500. Fixed in `V0007`.
-- **RLS made the security log unwritable exactly when it mattered.** A *refused* sign-in has no
-  user and no tenant, which is precisely what the write policy rejected. Fixed in `V0006` with a
-  narrow `SECURITY DEFINER` writer, and the application role's direct `INSERT` was revoked so the
-  function is the only writer rather than merely the recommended one.
-- **`@ConditionalOnProperty` treats an empty value as present.** With `${FIREBASE_PROJECT_ID:}`
-  defaulting to an empty string, a developer without Firebase would have failed at boot. Replaced
-  with an explicit non-blank condition.
+1. Apply the migration: `npm run db:deploy` (after testing locally)
+2. Update DATABASE_URL to use sankofa_app role instead of postgres
+3. Set secure password for sankofa_app role in production
+4. Convert existing data.ts reads to use transactions where needed
+5. Verify RLS enforcement in production environment
 
-### Resolved since first draft
+The migration is a draft, not ready to apply: validate it on a disposable database, finish the
+transaction coverage, then provision the login role from the deployment secret manager. Keep
+application-level scoping in `tenant-scope.ts` as defense-in-depth after RLS is enabled.
 
-- ~~`Money` untested~~ → 32 tests; also fixed a `hashCode` defect (`stripTrailingZeros()`
-  behaviour on zero has varied across JDKs, which would have made `Money` unreliable as a
-  `HashMap` key).
-- ~~`TenantAwareDataSource` untested~~ → 6 tests, including the pooled-connection handover that
-  proves a returned connection does not carry the previous tenant.
-- ~~`PermissionAspect` untested~~ → 9 tests, allow and deny for every rule, including the
-  fail-closed case where no context is bound.
-- ~~No ArchUnit boundary test~~ → 11 rules. Writing them immediately exposed a real violation:
-  `SecurityConfig` sat in `platform.config` while importing `identity`, making the shared kernel
-  depend on a domain module. Fixed by moving the wiring to a `config` composition root.
-- ~~`PermissionCatalogueIT` missing~~ → 8 tests, including segregation-of-duties assertions.
-- ~~`database/bootstrap/00_roles.sql` missing~~ → written, and it re-asserts the role attributes
-  on every run rather than trusting that an existing role is still correct.
-- ~~No `.env.example`~~ → written.
+### 2. No sign-in throttling
+
+`recordSecurityEvent` writes every failure, so the trail exists. Nothing acts on it. Credential
+stuffing against parent accounts is currently limited only by Vercel's platform-level rate limits.
+
+*What it takes:* a counter per account and per IP with an escalating lockout, checked before the
+bcrypt compare.
+
+### 3. No breached-password check
+
+Firebase did this. Nothing replaced it. A parent can currently set a password that appears in every
+credential-stuffing list in circulation.
+
+*What it takes:* the Have I Been Pwned range API — k-anonymity, so no password or full hash leaves
+the server — checked at password set time.
+
+### 4. No Content-Security-Policy
+
+`X-Frame-Options`, `X-Content-Type-Options`, `Referrer-Policy` and `Permissions-Policy` are set.
+A nonce-based `script-src` is not, so an injected inline script would execute.
+
+### 5. No invitation flow
+
+`AppUser.inviteTokenHash` exists in the schema. Nothing issues, sends or redeems an invitation, so
+the only way to create an account today is the seed or a manual insert. Email is unwired entirely.
+
+### 6. No error tracking, no uptime monitoring, no independent backup
+
+Failures reach Vercel's function logs and nowhere else; nobody is paged.
+
+Backups are worse than they were. Neon gave point-in-time history on the free tier; on Supabase,
+point-in-time recovery is a paid add-on and the free plan has no scheduled backups at all. Until
+that is resolved there is **no recovery path from a destructive migration** beyond whatever the
+project's plan provides — which is why `db:reset` and `db:migrate` now refuse any non-local host
+(`scripts/guard-local-db.mjs`), and why `docs/DEPLOYMENT.md` no longer promises one.
+
+### 7. CodeQL results are not enforced
+
+`.github/workflows/codeql.yml` carries `continue-on-error: true` on the upload step, because
+publishing to the Security tab on a private repository needs GitHub Advanced Security. A genuine
+CodeQL failure is currently tolerated. Remove that line the moment code scanning is enabled.
+
+### 8. Four documents still describe the retired stack
+
+`docs/THREAT_MODEL.md`, `docs/TESTING.md`, `docs/DATA_PRIVACY.md` and
+`docs/INCIDENT_RESPONSE.md` were written for the Java, Firebase and Flyway architecture. Each now
+carries a banner saying which parts still hold and which do not, rather than being half-corrected —
+a partly-updated security document is more dangerous than an obviously stale one, because you
+cannot tell which half you are reading.
+
+The threat model is the one that matters most: it describes row-level security as in place.
+
+### 9. Architecture rules are weaker than they were
+
+ArchUnit enforced module boundaries and a no-float-for-money rule that ESLint cannot express. Those
+invariants are now held by review and by the tests named above.
 
 ---
 
-## Next actions, in priority order
+## Not built
 
-**Blocked on you, and blocking the most:**
+The whole product, essentially. Listed so nobody has to guess.
 
-1. **Provision a Firebase project.** Nobody can sign in without one, so the web tier cannot be
-   driven end to end in a browser and the production smoke test cannot be run. Everything below
-   is verifiable without it; the seam between the two tiers is not.
+- Students, guardians, enrolment and admissions (in progress: schema, student list, admission and profile views; guardian and enrolment workflows remain incomplete)
+- Classes, subjects, timetable
+- Attendance
+- Assessment, grading, report cards
+- Fees, invoicing, payments, receipts
+- Double-entry accounting, the ledger, bank reconciliation
+- HR, leave, payroll, payslips
+- Library, health, counselling, transport, hostel, inventory, procurement
+- Messaging and announcements
+- Campus and branding management screens (the models exist; the screens do not)
+- Platform administration
+- Reporting and analytics
+- Data export and import
+- Anything offline
 
-**Unblocked:**
+The permission catalogue already names the permissions these modules will check. A code existing in
+`prisma/seed-data.ts` means the authorization model anticipated the feature — not that the feature
+exists.
 
-2. Screens for campus and branding — the APIs exist and are tested; there are no UI screens.
-3. Outbox poller and the notification service skeleton. Until this exists,
-   `ARCHITECTURE.md` §6's description of event dispatch is aspirational, and nothing writes to
-   `platform.outbox` either.
-4. The seven missing ADRs and six missing documents. `ARCHITECTURE.md` §8 links to all of them
-   and every link is currently dead.
-5. Students and guardians — the first module with genuinely sensitive personal data, and the
-   first real test of the role-by-field visibility matrix in `DATA_PRIVACY.md`.
-6. Replace the in-memory rate limiter with a shared store, before any multi-instance deployment.
+---
+
+## Tests
+
+| Suite | Runs | Proves |
+| --- | --- | --- |
+| `src/lib/calendarStatus.test.ts` | `npm test` | The state machine, including that CLOSED is terminal; date-range rules |
+| `src/lib/permissionCatalogue.test.ts` | `npm test` | Every referenced permission code exists; segregation of duties holds |
+| `src/server/tenantScopeCoverage.test.ts` | `npm test` | Every model with a `tenantId` is scoped |
+| `tests/db/tenant-isolation.test.ts` | `npm run test:db` | Cross-tenant read, update, delete and write-by-claim all fail, against real PostgreSQL |
+| `tests/db/calendar-constraints.test.ts` | `npm run test:db` | The database, not the application, refuses overlapping and backwards periods |
+| `tests/db/data-api-lockdown.test.ts` | `npm run test:db` | No table lacks RLS; the Data API roles hold nothing; btree_gist is out of `public` |
+| `tests/db/rls-tenant-isolation.test.ts` | `npm run test:db` | Tenant policies deny unscoped reads, isolate School A from B, and reject cross-school student-campus links |
+| `tests/db/rls-tenant-isolation.test.ts` | `npm run test:db` | Tenant policies deny unscoped reads, isolate School A from B, and reject cross-school student-campus links |
+
+**Not tested yet:** the sign-in path end to end, the calendar actions against a database, session
+revocation, permission resolution with DENY grants. Those need either a database fixture with
+seeded users or a browser test, and neither exists.
+
+There is no coverage threshold. A percentage would measure lines executed, not behaviour asserted,
+and the number would be met long before the things above were tested.
