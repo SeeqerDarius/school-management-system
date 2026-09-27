@@ -3,6 +3,7 @@ import 'server-only';
 import { withRlsTransaction } from '@/server/tenant-scope';
 import { requirePermission } from '@/server/auth/session';
 import { P } from '@/lib/permissions';
+import { studentReach, studentsInReach } from '@/lib/student-reach';
 import { studentListQuerySchema } from './schema';
 import type { StudentListQuery } from './schema';
 import { z } from 'zod';
@@ -17,9 +18,28 @@ import { z } from 'zod';
  */
 export async function getStudents(input: StudentListQuery = { page: 1, limit: 20 }) {
   const query = studentListQuerySchema.parse(input);
-  const { tenantId } = await requirePermission(P.STUDENT_READ);
+  const session = await requirePermission(P.STUDENT_READ);
+  const { tenantId } = session;
 
-  const where: Record<string, unknown> = {};
+  // STUDENT_READ says this person may use the admissions screens. It does NOT say which
+  // children they may see — the catalogue draws that line with STUDENT_VIEW against
+  // STUDENT_VIEW_OWN_CLASS, and a TEACHER holds only the second. Gating on STUDENT_READ
+  // alone returned every child in the school to any teacher, guardian phone numbers
+  // included, because `where` started empty and nothing narrowed it.
+  //
+  // Narrowed here, in the query, rather than filtered after it: a query that fetches every
+  // child and hides some when rendering has already sent every child to the server
+  // component.
+  const where: Record<string, unknown> = {
+    ...studentsInReach(
+      studentReach({
+        principalType: session.principalType,
+        principalId: session.principalId,
+        membershipId: session.membershipId,
+        permissions: session.permissions,
+      }),
+    ),
+  };
 
   if (query.status) {
     where.status = query.status;
@@ -80,11 +100,25 @@ export async function getStudents(input: StudentListQuery = { page: 1, limit: 20
  */
 export async function getStudentById(id: string) {
   const studentId = z.string().uuid().parse(id);
-  const { tenantId } = await requirePermission(P.STUDENT_READ);
+  const session = await requirePermission(P.STUDENT_READ);
+  const { tenantId } = session;
+
+  // Same reach, applied to one child. findFirst rather than findUnique because the clause is
+  // now id AND reach, and a person who may not see this child gets null — which the page
+  // turns into a 404. "No such student" is the right answer to give somebody who may not
+  // see this one; a refusal naming a permission tells them the record exists.
+  const reachable = studentsInReach(
+    studentReach({
+      principalType: session.principalType,
+      principalId: session.principalId,
+      membershipId: session.membershipId,
+      permissions: session.permissions,
+    }),
+  );
 
   return withRlsTransaction(tenantId, async (tx) => {
-  const student = await tx.student.findUnique({
-    where: { id: studentId },
+  const student = await tx.student.findFirst({
+    where: { id: studentId, ...reachable },
     select: {
       id: true,
       reference: true,

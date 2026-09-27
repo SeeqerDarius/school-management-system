@@ -38,6 +38,20 @@ export const P = {
   ENROLMENT_UPDATE: 'ENROLMENT_UPDATE',
   ENROLMENT_DELETE: 'ENROLMENT_DELETE',
   ENROLMENT_STATUS_CHANGE: 'ENROLMENT_STATUS_CHANGE',
+  // How far a roster reaches. Both are already in the seeded catalogue and already
+  // correctly assigned — STUDENT_VIEW to the people who run the school,
+  // STUDENT_VIEW_OWN_CLASS to the people who stand in front of a class. They were simply
+  // never referenced from code, so nothing read the line the catalogue was drawing.
+  STUDENT_VIEW: 'STUDENT_VIEW',
+  STUDENT_VIEW_OWN_CLASS: 'STUDENT_VIEW_OWN_CLASS',
+  GUARDIAN_VIEW: 'GUARDIAN_VIEW',
+
+  // Medical. The catalogue already separates the flag from the record, which is exactly the
+  // distinction DATA_PRIVACY §4 asks for: a teacher learns there is an alert and fetches the
+  // nurse; the nurse reads what it says.
+  HEALTH_ALERT_VIEW: 'HEALTH_ALERT_VIEW',
+  HEALTH_RECORD_VIEW: 'HEALTH_RECORD_VIEW',
+
   // People and access
   USER_VIEW: 'USER_VIEW',
   USER_INVITE: 'USER_INVITE',
