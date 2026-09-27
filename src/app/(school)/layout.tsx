@@ -1,6 +1,7 @@
 import Link from 'next/link';
 
 import { SignOutButton } from '@/features/auth/components/sign-out-button';
+import { isFamilyPrincipal } from '@/lib/student-visibility';
 import { requireActiveSession } from '@/server/auth/session';
 import { P } from '@/lib/permissions';
 
@@ -22,6 +23,23 @@ export default async function SchoolLayout({
   // enough, but it also means an expired session is turned away at the shell rather than after a
   // page has already begun querying.
   const session = await requireActiveSession();
+  const may = (...codes: string[]) => codes.some((code) => session.permissions.has(code));
+  const isFamily = isFamilyPrincipal(session.principalType);
+
+  const links = [
+    { href: '/settings/calendar', label: 'Academic calendar', show: may(P.ACADEMIC_YEAR_VIEW) },
+    {
+      href: '/students',
+      label: isFamily ? 'My children' : 'Students',
+      show: isFamily || may(P.STUDENT_READ),
+    },
+    // A class teacher holds no CLASS_VIEW — their reach over a class comes from being its class
+    // teacher, which ATTENDANCE_VIEW stands in for here. Families get neither screen: both are
+    // about a class as a group, and a child's own attendance is on the child's own record.
+    { href: '/classes', label: 'Classes', show: !isFamily && may(P.CLASS_VIEW, P.ATTENDANCE_VIEW) },
+    { href: '/attendance', label: 'Attendance', show: !isFamily && may(P.ATTENDANCE_VIEW) },
+    { href: '/settings/people', label: 'People', show: may(P.USER_VIEW) },
+  ].filter((link) => link.show);
 
   return (
     <div className="min-h-dvh">
@@ -34,42 +52,25 @@ export default async function SchoolLayout({
             Sankofa
           </Link>
 
-          {/* Role-aware navigation replaces this as the modules land. Hiding a link is never
-              authorization — the server refuses regardless of what was rendered (§98). */}
-          <nav aria-label="School settings">
-            <ul className="flex items-center gap-1 text-sm">
-              <li>
-                <Link
-                  href="/settings/calendar"
-                  className="rounded-[var(--radius-control)] px-2.5 py-1.5
-                             text-[var(--color-ink-muted)] hover:bg-[var(--color-surface-sunken)]
-                             hover:text-[var(--color-ink)]"
-                >
-                  Academic calendar
-                </Link>
-              </li>
-              {session.permissions.has(P.STUDENT_READ) && (
-                <li>
+          {/* Shown by permission — which is NOT how access is decided. The server refuses
+              regardless of what was rendered (§98), and every one of these pages checks for
+              itself. This is about not offering somebody a door that is always locked: a class
+              teacher who clicks "Fees" and is told they may not is being asked to discover a
+              rule the product could simply have not put in front of them. */}
+          <nav aria-label="Sections">
+            <ul className="flex flex-wrap items-center gap-1 text-sm">
+              {links.map((link) => (
+                <li key={link.href}>
                   <Link
-                    href="/students"
+                    href={link.href}
                     className="rounded-[var(--radius-control)] px-2.5 py-1.5
                                text-[var(--color-ink-muted)] hover:bg-[var(--color-surface-sunken)]
                                hover:text-[var(--color-ink)]"
                   >
-                    Students
+                    {link.label}
                   </Link>
                 </li>
-              )}
-              <li>
-                <Link
-                  href="/settings/people"
-                  className="rounded-[var(--radius-control)] px-2.5 py-1.5
-                             text-[var(--color-ink-muted)] hover:bg-[var(--color-surface-sunken)]
-                             hover:text-[var(--color-ink)]"
-                >
-                  People
-                </Link>
-              </li>
+              ))}
             </ul>
           </nav>
 

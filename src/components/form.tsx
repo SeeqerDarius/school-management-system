@@ -61,16 +61,97 @@ export function SubmitButton({
   children,
   pendingLabel = 'Saving…',
   variant = 'primary',
+  name,
+  value,
 }: {
   children: React.ReactNode;
   pendingLabel?: string;
   variant?: ButtonVariant;
+  /**
+   * Submits this name/value pair alongside the form, so one form can have two submit buttons
+   * that mean different things — "save" and "save and submit" on a register. The browser sends
+   * only the button that was pressed, which is how the server tells them apart without a hidden
+   * field that some other control has to keep in step.
+   */
+  name?: string;
+  value?: string;
 }) {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" variant={variant} disabled={pending} aria-live="polite">
+    <Button
+      type="submit"
+      variant={variant}
+      disabled={pending}
+      aria-live="polite"
+      {...(name ? { name } : {})}
+      {...(value ? { value } : {})}
+    >
       {pending ? pendingLabel : children}
     </Button>
+  );
+}
+
+/**
+ * A multi-line field, for the places where a person is asked to say why.
+ *
+ * <p>Every one of those is a reason attached to something irreversible — a correction to a
+ * submitted register, a locked register, a closed enrolment — so the label says what it is for
+ * rather than "Notes".
+ */
+export function TextAreaField({
+  label,
+  name,
+  hint,
+  error,
+  required,
+  rows = 3,
+  maxLength,
+  defaultValue,
+}: {
+  label: string;
+  name: string;
+  hint?: string;
+  error?: string | undefined;
+  required?: boolean;
+  rows?: number;
+  maxLength?: number;
+  defaultValue?: string | undefined;
+}) {
+  const id = `field-${name}`;
+  const describedBy = [hint ? `${id}-hint` : null, error ? `${id}-error` : null]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-sm font-medium text-[var(--color-ink)]">
+        {label}
+        {required ? <span aria-hidden="true"> *</span> : null}
+      </label>
+      {hint ? (
+        <p id={`${id}-hint`} className="text-xs text-[var(--color-ink-muted)]">
+          {hint}
+        </p>
+      ) : null}
+      <textarea
+        id={id}
+        name={name}
+        rows={rows}
+        required={required}
+        maxLength={maxLength}
+        defaultValue={defaultValue}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy || undefined}
+        className="w-full rounded-[var(--radius-control)] border border-[var(--color-border)]
+                   bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-ink)]
+                   focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+      />
+      {error ? (
+        <p id={`${id}-error`} role="alert" className="text-xs text-[var(--color-danger)]">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -88,7 +169,7 @@ export function Field({
   label: string;
   name: string;
   type?: 'text' | 'date' | 'number' | 'email' | 'password';
-  defaultValue?: string;
+  defaultValue?: string | undefined;
   required?: boolean;
   error?: string | undefined;
   hint?: string;
@@ -189,7 +270,7 @@ export function SelectField({
   label: string;
   name: string;
   options: ReadonlyArray<{ value: string; label: string }>;
-  defaultValue?: string;
+  defaultValue?: string | undefined;
   required?: boolean;
   error?: string | undefined;
   hint?: string;
