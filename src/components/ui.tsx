@@ -17,8 +17,8 @@ export function Panel({
   children,
   className,
 }: {
-  title?: string;
-  description?: string;
+  title?: string | undefined;
+  description?: string | undefined;
   actions?: ReactNode;
   children: ReactNode;
   className?: string;

@@ -38,6 +38,44 @@ export const P = {
   ENROLMENT_UPDATE: 'ENROLMENT_UPDATE',
   ENROLMENT_DELETE: 'ENROLMENT_DELETE',
   ENROLMENT_STATUS_CHANGE: 'ENROLMENT_STATUS_CHANGE',
+  // How far a roster reaches. Both are already in the seeded catalogue and already
+  // correctly assigned — STUDENT_VIEW to the people who run the school,
+  // STUDENT_VIEW_OWN_CLASS to the people who stand in front of a class. They were simply
+  // never referenced from code, so nothing read the line the catalogue was drawing.
+  STUDENT_VIEW: 'STUDENT_VIEW',
+  STUDENT_VIEW_OWN_CLASS: 'STUDENT_VIEW_OWN_CLASS',
+  GUARDIAN_VIEW: 'GUARDIAN_VIEW',
+
+  // Medical. The catalogue already separates the flag from the record, which is exactly the
+  // distinction DATA_PRIVACY §4 asks for: a teacher learns there is an alert and fetches the
+  // nurse; the nurse reads what it says.
+  HEALTH_ALERT_VIEW: 'HEALTH_ALERT_VIEW',
+  HEALTH_RECORD_VIEW: 'HEALTH_RECORD_VIEW',
+
+  // Classes and the daily register. All already in the seeded catalogue.
+  CLASS_VIEW: 'CLASS_VIEW',
+  CLASS_MANAGE: 'CLASS_MANAGE',
+  ADMISSION_ENROL: 'ADMISSION_ENROL',
+  ATTENDANCE_VIEW: 'ATTENDANCE_VIEW',
+  ATTENDANCE_MARK: 'ATTENDANCE_MARK',
+  ATTENDANCE_CORRECT: 'ATTENDANCE_CORRECT',
+  ATTENDANCE_LOCK: 'ATTENDANCE_LOCK',
+
+  // Fees, invoicing and money. All already in the seeded catalogue.
+  FEES_VIEW: 'FEES_VIEW',
+  FEES_STRUCTURE_MANAGE: 'FEES_STRUCTURE_MANAGE',
+  FEES_DISCOUNT: 'FEES_DISCOUNT',
+  FEES_WAIVE: 'FEES_WAIVE',
+  INVOICE_CREATE: 'INVOICE_CREATE',
+  INVOICE_CANCEL: 'INVOICE_CANCEL',
+  RECEIPT_ISSUE: 'RECEIPT_ISSUE',
+  PAYMENT_RECORD: 'PAYMENT_RECORD',
+  PAYMENT_ALLOCATE: 'PAYMENT_ALLOCATE',
+  PAYMENT_REFUND: 'PAYMENT_REFUND',
+  PAYMENT_REFUND_APPROVE: 'PAYMENT_REFUND_APPROVE',
+
+  GUARDIAN_MANAGE: 'GUARDIAN_MANAGE',
+
   // People and access
   USER_VIEW: 'USER_VIEW',
   USER_INVITE: 'USER_INVITE',

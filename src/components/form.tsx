@@ -61,16 +61,97 @@ export function SubmitButton({
   children,
   pendingLabel = 'Saving…',
   variant = 'primary',
+  name,
+  value,
 }: {
   children: React.ReactNode;
   pendingLabel?: string;
   variant?: ButtonVariant;
+  /**
+   * Submits this name/value pair alongside the form, so one form can have two submit buttons
+   * that mean different things — "save" and "save and submit" on a register. The browser sends
+   * only the button that was pressed, which is how the server tells them apart without a hidden
+   * field that some other control has to keep in step.
+   */
+  name?: string;
+  value?: string;
 }) {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" variant={variant} disabled={pending} aria-live="polite">
+    <Button
+      type="submit"
+      variant={variant}
+      disabled={pending}
+      aria-live="polite"
+      {...(name ? { name } : {})}
+      {...(value ? { value } : {})}
+    >
       {pending ? pendingLabel : children}
     </Button>
+  );
+}
+
+/**
+ * A multi-line field, for the places where a person is asked to say why.
+ *
+ * <p>Every one of those is a reason attached to something irreversible — a correction to a
+ * submitted register, a locked register, a closed enrolment — so the label says what it is for
+ * rather than "Notes".
+ */
+export function TextAreaField({
+  label,
+  name,
+  hint,
+  error,
+  required,
+  rows = 3,
+  maxLength,
+  defaultValue,
+}: {
+  label: string;
+  name: string;
+  hint?: string | undefined;
+  error?: string | undefined;
+  required?: boolean;
+  rows?: number;
+  maxLength?: number;
+  defaultValue?: string | undefined;
+}) {
+  const id = `field-${name}`;
+  const describedBy = [hint ? `${id}-hint` : null, error ? `${id}-error` : null]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-sm font-medium text-[var(--color-ink)]">
+        {label}
+        {required ? <span aria-hidden="true"> *</span> : null}
+      </label>
+      {hint ? (
+        <p id={`${id}-hint`} className="text-xs text-[var(--color-ink-muted)]">
+          {hint}
+        </p>
+      ) : null}
+      <textarea
+        id={id}
+        name={name}
+        rows={rows}
+        required={required}
+        maxLength={maxLength}
+        defaultValue={defaultValue}
+        aria-invalid={error ? true : undefined}
+        aria-describedby={describedBy || undefined}
+        className="w-full rounded-[var(--radius-control)] border border-[var(--color-border)]
+                   bg-[var(--color-surface)] px-3 py-2 text-sm text-[var(--color-ink)]
+                   focus:outline-none focus:ring-2 focus:ring-[var(--color-accent)]"
+      />
+      {error ? (
+        <p id={`${id}-error`} role="alert" className="text-xs text-[var(--color-danger)]">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -84,21 +165,30 @@ export function Field({
   hint,
   placeholder,
   autoComplete,
+  inputMode,
 }: {
   label: string;
   name: string;
   type?: 'text' | 'date' | 'number' | 'email' | 'password';
-  defaultValue?: string;
+  defaultValue?: string | undefined;
   required?: boolean;
   error?: string | undefined;
-  hint?: string;
-  placeholder?: string;
+  hint?: string | undefined;
+  placeholder?: string | undefined;
   /**
    * Passed through so password managers behave. `new-password` on a field somebody is choosing
    * a password in is what makes a manager offer to generate and store one, and leaving it off
    * is a large part of why people type the same password everywhere.
    */
-  autoComplete?: string;
+  autoComplete?: string | undefined;
+  /**
+   * The on-screen keyboard to offer, independently of the input's type.
+   *
+   * <p>An amount is `type="text"` with `inputMode="decimal"`, never `type="number"`. A number
+   * input hands back a value the browser has already parsed and re-rendered, and money in this
+   * product is a string from end to end precisely so nothing ever does that to it.
+   */
+  inputMode?: 'text' | 'decimal' | 'numeric' | 'tel' | 'email';
 }) {
   const id = useId();
   const errorId = `${id}-error`;
@@ -130,6 +220,7 @@ export function Field({
         required={required}
         placeholder={placeholder}
         autoComplete={autoComplete}
+        inputMode={inputMode}
         aria-invalid={error ? true : undefined}
         aria-describedby={describedBy.length > 0 ? describedBy : undefined}
         className={clsx(
@@ -189,12 +280,12 @@ export function SelectField({
   label: string;
   name: string;
   options: ReadonlyArray<{ value: string; label: string }>;
-  defaultValue?: string;
+  defaultValue?: string | undefined;
   required?: boolean;
   error?: string | undefined;
-  hint?: string;
+  hint?: string | undefined;
   /** Shown as a non-selectable first row when nothing is chosen yet. */
-  placeholder?: string;
+  placeholder?: string | undefined;
 }) {
   const id = useId();
   const errorId = `${id}-error`;
@@ -246,6 +337,46 @@ export function SelectField({
           {error}
         </p>
       )}
+    </div>
+  );
+}
+
+/** A single checkbox with its label and hint, for a setting rather than a value. */
+export function CheckboxField({
+  label,
+  name,
+  defaultChecked,
+  hint,
+}: {
+  label: string;
+  name: string;
+  defaultChecked?: boolean;
+  hint?: string | undefined;
+}) {
+  const id = useId();
+  const hintId = `${id}-hint`;
+
+  return (
+    <div className="flex items-start gap-2">
+      <input
+        id={id}
+        name={name}
+        type="checkbox"
+        defaultChecked={defaultChecked}
+        aria-describedby={hint ? hintId : undefined}
+        className="mt-0.5 size-4 rounded border-[var(--color-border-strong)]
+                   accent-[var(--color-primary)]"
+      />
+      <div className="min-w-0">
+        <label htmlFor={id} className="text-sm text-[var(--color-ink)]">
+          {label}
+        </label>
+        {hint && (
+          <p id={hintId} className="text-xs text-[var(--color-ink-muted)]">
+            {hint}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

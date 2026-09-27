@@ -67,6 +67,10 @@ export async function membershipsForUser(userId: string) {
         id: true,
         tenantId: true,
         principalType: true,
+        // Which guardian or student this membership IS. A guardian's reach cannot be
+        // expressed as a permission — two parents at one school hold identical permissions
+        // and must see entirely different children — so the link itself has to travel.
+        principalId: true,
         tenant: { select: { slug: true, displayName: true } },
       },
       orderBy: { tenant: { displayName: 'asc' } },

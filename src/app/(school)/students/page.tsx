@@ -1,6 +1,8 @@
 import Link from 'next/link';
 
-import { hasPermission } from '@/server/auth/session';
+import { ErrorState, PageHeader } from '@/components/ui';
+import { isFamilyPrincipal } from '@/lib/student-visibility';
+import { hasPermission, requireActiveSession } from '@/server/auth/session';
 import { P } from '@/lib/permissions';
 import { getStudents } from '@/features/students/data';
 import { studentListQuerySchema } from '@/features/students/schema';
@@ -15,6 +17,24 @@ export default async function StudentsPage({
   searchParams: Promise<{ status?: string; campusId?: string; search?: string; page?: string; created?: string }>;
 }) {
   const params = await searchParams;
+  const session = await requireActiveSession();
+
+  // Said here rather than thrown from the query. Somebody without STUDENT_READ reaching this
+  // page is not an error condition — it is somebody who does not do this job — and throwing
+  // turned that into a 500 with a digest for six of the eight demo accounts: the headmaster,
+  // the bursar, the finance manager, the registrar, both class teachers and the parent.
+  if (!isFamilyPrincipal(session.principalType) && !session.permissions.has(P.STUDENT_READ)) {
+    return (
+      <main id="main" className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
+        <PageHeader title="Students" />
+        <ErrorState
+          title="The student register is not part of your role"
+          detail="If you need to look a child up, ask whoever administers this school."
+        />
+      </main>
+    );
+  }
+
   const canCreate = await hasPermission(P.STUDENT_CREATE);
   const parsed = studentListQuerySchema.safeParse({
     status: params.status || undefined,

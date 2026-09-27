@@ -22,6 +22,15 @@ export interface ActiveSession {
   tenantName: string;
   permissions: Set<string>;
   /**
+   * Whether this membership is staff, a guardian or a pupil.
+   *
+   * <p>Not interchangeable with a permission. A permission says what somebody may do; it
+   * cannot say to whom, and the two questions have different answers for a parent.
+   */
+  principalType: string;
+  /** The guardian or student row this membership is, where it is one. */
+  principalId: string | null;
+  /**
    * Runs database work for this school.
    *
    * <p>A runner rather than a client, because the tenant has to be bound inside a transaction
@@ -67,6 +76,8 @@ export async function requireActiveSession(): Promise<ActiveSession> {
     tenantSlug: session.tenantSlug ?? '',
     tenantName: active?.tenant.displayName ?? session.tenantSlug ?? '',
     permissions: new Set(session.permissions ?? []),
+    principalType: active?.principalType ?? 'STAFF',
+    principalId: active?.principalId ?? null,
     transaction: (work) =>
       inTenantTransaction({ tenantId: session.tenantId as string, userId: session.userId }, work),
   };

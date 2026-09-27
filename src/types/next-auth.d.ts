@@ -23,6 +23,7 @@ declare module 'next-auth' {
       id: string;
       tenantId: string;
       principalType: PrincipalType;
+      principalId: string | null;
       tenant: { slug: string; displayName: string };
     }[];
   }

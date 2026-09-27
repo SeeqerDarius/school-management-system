@@ -20,6 +20,7 @@
     "db:deploy": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
+    "db:demo": "node scripts/guard-local-db.mjs && tsx prisma/seed-demo.ts",
     "db:reset": "node scripts/guard-local-db.mjs && prisma migrate reset --force",
     "test:db": "vitest run --config vitest.db.config.ts"
   },
