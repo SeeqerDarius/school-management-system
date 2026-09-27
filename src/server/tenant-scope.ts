@@ -57,6 +57,15 @@ const TENANT_OWNED = new Set<string>([
   'ClassGroup',
   'AttendanceRegister',
   'AttendanceEntry',
+  'FeeItem',
+  'FeeSchedule',
+  'FeeScheduleLine',
+  'Invoice',
+  'InvoiceLine',
+  'CreditNote',
+  'Payment',
+  'PaymentAllocation',
+  'Refund',
 ]);
 
 /**

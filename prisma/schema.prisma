@@ -94,6 +94,20 @@ model Tenant {
   attendanceRegisters AttendanceRegister[]
   attendanceEntries   AttendanceEntry[]
 
+  feeItems              FeeItem[]
+  feeSchedules          FeeSchedule[]
+  feeScheduleLines      FeeScheduleLine[]
+  invoices              Invoice[]
+  invoiceLines          InvoiceLine[]
+  creditNotes           CreditNote[]
+  payments              Payment[]
+  paymentAllocations    PaymentAllocation[]
+  refunds               Refund[]
+  /// §187: a child is not told the family is in arrears. Off by default, and a second
+  /// gate behind FEES_VIEW so granting that permission by accident does not tell a
+  /// fifteen-year-old what their parents owe.
+  studentsSeeFeeBalance Boolean             @default(false)
+
   @@index([status])
   @@map("tenant")
 }
@@ -513,6 +527,9 @@ model AcademicYear {
 
   classGroups ClassGroup[]
 
+  feeSchedules FeeSchedule[]
+  invoices     Invoice[]
+
   @@unique([id, tenantId])
   @@unique([tenantId, code])
   @@index([tenantId, status])
@@ -546,6 +563,9 @@ model Term {
   enrolments   Enrolment[]
 
   attendanceRegisters AttendanceRegister[]
+
+  feeSchedules FeeSchedule[]
+  invoices     Invoice[]
 
   @@unique([id, tenantId])
   @@unique([academicYearId, sequence])
@@ -636,6 +656,9 @@ model Student {
 
   attendanceEntries AttendanceEntry[]
 
+  invoices Invoice[]
+  payments Payment[]
+
   @@unique([id, tenantId])
   @@unique([tenantId, reference])
   @@index([tenantId, status])
@@ -694,6 +717,7 @@ model Guardian {
 
   tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   relationships GuardianRelationship[]
+  payments      Payment[]
 
   @@unique([id, tenantId])
   @@index([tenantId, lastName, firstName])
@@ -840,6 +864,8 @@ model ClassGroup {
 
   registers AttendanceRegister[]
 
+  feeSchedules FeeSchedule[]
+
   @@unique([id, tenantId])
   @@unique([tenantId, academicYearId, code])
   @@index([tenantId, academicYearId])
@@ -936,4 +962,357 @@ model AttendanceEntry {
   @@unique([registerId, studentId])
   @@index([tenantId, studentId])
   @@map("attendance_entry")
+}
+
+model FeeItem {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+
+  code        String
+  name        String
+  /// Shown on the invoice line when the school wants more than the name.
+  description String?
+
+  /// An optional item is offered but not automatically billed — a school bus place, a club.
+  isOptional Boolean @default(false)
+  /// Retired items stay, because past invoices reference them.
+  isActive   Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant        Tenant            @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  scheduleLines FeeScheduleLine[]
+  invoiceLines  InvoiceLine[]
+
+  @@unique([tenantId, code])
+  @@unique([id, tenantId])
+  @@index([tenantId, isActive])
+  @@map("fee_item")
+}
+
+/// A price list: what this class pays, this term.
+///
+/// Versioned by status rather than edited in place. Once invoices have been raised from a
+/// schedule, changing its prices would silently disagree with every invoice already sent —
+/// so an ACTIVE schedule is frozen and a new one supersedes it (I-6).
+enum FeeScheduleStatus {
+  DRAFT
+  ACTIVE
+  /// Superseded. Kept because invoices reference it.
+  ARCHIVED
+}
+
+model FeeSchedule {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+
+  academicYearId String  @db.Uuid
+  termId         String  @db.Uuid
+  /// Null means "every class in the year". A schedule naming a class overrides the general one.
+  classGroupId   String? @db.Uuid
+
+  name     String
+  currency String            @db.Char(3)
+  status   FeeScheduleStatus @default(DRAFT)
+
+  /// I-6. The date from which this schedule is the one in force.
+  effectiveFrom DateTime  @db.Date
+  activatedAt   DateTime?
+  archivedAt    DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  academicYear AcademicYear @relation(fields: [academicYearId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  term         Term         @relation(fields: [termId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  classGroup   ClassGroup?  @relation(fields: [classGroupId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  lines    FeeScheduleLine[]
+  invoices Invoice[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, termId, status])
+  @@map("fee_schedule")
+}
+
+model FeeScheduleLine {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+
+  feeScheduleId String @db.Uuid
+  feeItemId     String @db.Uuid
+
+  /// I-2: decimal, and the currency lives on the schedule this line belongs to.
+  amount      Decimal @db.Decimal(19, 4)
+  /// Included on every invoice raised from this schedule unless the item is optional.
+  isMandatory Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  feeSchedule FeeSchedule @relation(fields: [feeScheduleId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  feeItem     FeeItem     @relation(fields: [feeItemId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([feeScheduleId, feeItemId])
+  @@map("fee_schedule_line")
+}
+
+enum InvoiceStatus {
+  /// Being prepared. Editable.
+  DRAFT
+  /// Sent to the family. Immutable from here (I-3) — correct by credit note.
+  ISSUED
+  /// Voided before anything was paid against it. Kept, never deleted.
+  CANCELLED
+}
+
+/// What one child owes for one term.
+model Invoice {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+
+  /// Allocated from `reference_sequence` at issue, not at creation: a draft that is never
+  /// issued must not consume a number out of the sequence an auditor reads as contiguous.
+  invoiceNo String?
+
+  studentId      String  @db.Uuid
+  academicYearId String  @db.Uuid
+  termId         String  @db.Uuid
+  /// Provenance. The amounts live on the lines; this only says where they came from.
+  feeScheduleId  String? @db.Uuid
+
+  status   InvoiceStatus @default(DRAFT)
+  currency String        @db.Char(3)
+
+  issuedOn DateTime? @db.Date
+  dueOn    DateTime? @db.Date
+
+  /// Sum of the lines before discount.
+  subtotal      Decimal @default(0) @db.Decimal(19, 4)
+  /// Discounts applied while drafting. A reduction after issue is a credit note instead.
+  discountTotal Decimal @default(0) @db.Decimal(19, 4)
+  /// subtotal − discountTotal. Stored rather than derived so a reprint cannot drift, and
+  /// checked against the lines by a deferred trigger at commit (the I-4 pattern).
+  total         Decimal @default(0) @db.Decimal(19, 4)
+
+  cancelledAt     DateTime?
+  cancelledReason String?
+
+  notes String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant       Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  student      Student      @relation(fields: [studentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  academicYear AcademicYear @relation(fields: [academicYearId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  term         Term         @relation(fields: [termId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  feeSchedule  FeeSchedule? @relation(fields: [feeScheduleId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  lines       InvoiceLine[]
+  allocations PaymentAllocation[]
+  creditNotes CreditNote[]
+
+  @@unique([tenantId, invoiceNo])
+  @@unique([id, tenantId])
+  /// One live invoice per child per term. A second one is how a family gets billed twice.
+  @@index([tenantId, studentId, termId])
+  @@index([tenantId, status])
+  @@map("invoice")
+}
+
+model InvoiceLine {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+
+  invoiceId String @db.Uuid
+  feeItemId String @db.Uuid
+
+  /// Snapshotted from the fee item at issue. I-6 and §4.2 both: the invoice reproduces what it
+  /// said at the time, and renaming a fee item next year does not rewrite last year's paper.
+  description String
+
+  quantity   Int     @default(1)
+  unitAmount Decimal @db.Decimal(19, 4)
+  /// The share of the invoice's discount that landed on this line — apportioned so the parts
+  /// sum exactly to the whole. See `apportion` in src/lib/money.ts.
+  discount   Decimal @default(0) @db.Decimal(19, 4)
+  /// quantity × unitAmount − discount.
+  lineTotal  Decimal @db.Decimal(19, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoice Invoice @relation(fields: [invoiceId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  feeItem FeeItem @relation(fields: [feeItemId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@index([tenantId, invoiceId])
+  @@map("invoice_line")
+}
+
+/// Reduces an issued invoice, because an issued invoice cannot be edited (I-3).
+///
+/// This is the fee analogue of a journal reversal: the original stays exactly as it was sent,
+/// and the correction is a second document that references it. A bursar who "just fixes the
+/// amount" leaves the family holding a piece of paper the system disagrees with.
+model CreditNote {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+
+  creditNoteNo String?
+  invoiceId    String  @db.Uuid
+
+  amount   Decimal @db.Decimal(19, 4)
+  currency String  @db.Char(3)
+
+  /// Mandatory, with a floor. §188: a waiver is a decision somebody has to answer for.
+  reason   String
+  issuedOn DateTime @db.Date
+
+  issuedByMembershipId String @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  invoice Invoice @relation(fields: [invoiceId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([tenantId, creditNoteNo])
+  @@index([tenantId, invoiceId])
+  @@map("credit_note")
+}
+
+enum PaymentMethod {
+  CASH
+  /// Dominant in Ghana. The reference is the transaction id the family can quote back.
+  MOBILE_MONEY
+  BANK_TRANSFER
+  CHEQUE
+  CARD
+}
+
+enum PaymentStatus {
+  RECORDED
+  /// Bounced cheque, reversed transfer. The original row is never edited (I-3).
+  REVERSED
+}
+
+/// Money received. Deliberately NOT "a payment of an invoice".
+///
+/// A family hands over ₵500 against a ₵1,200 invoice, or against two children's invoices, or
+/// before any invoice exists. Tying a payment to exactly one invoice makes all three of those
+/// impossible, and every school does all three. So a payment is money, and
+/// `PaymentAllocation` decides what it settles; whatever is left is credit on account.
+model Payment {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+
+  receiptNo String?
+
+  /// Who the money is for. A payment always lands on a child's account.
+  studentId       String  @db.Uuid
+  /// Who handed it over, where that is recorded. Null for a bank transfer nobody can attribute.
+  payerGuardianId String? @db.Uuid
+
+  method    PaymentMethod
+  /// The momo transaction id, cheque number or bank reference. Not a secret, and never a
+  /// card number: §6 of AGENTS.md forbids full payment detail in any log or column.
+  reference String?
+
+  amount   Decimal @db.Decimal(19, 4)
+  currency String  @db.Char(3)
+
+  receivedOn DateTime      @db.Date
+  status     PaymentStatus @default(RECORDED)
+
+  reversedAt     DateTime?
+  reversedReason String?
+
+  receivedByMembershipId String @db.Uuid
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  student Student   @relation(fields: [studentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  payer   Guardian? @relation(fields: [payerGuardianId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  allocations PaymentAllocation[]
+  refunds     Refund[]
+
+  @@unique([tenantId, receiptNo])
+  @@unique([id, tenantId])
+  @@index([tenantId, studentId])
+  @@index([tenantId, receivedOn])
+  @@map("payment")
+}
+
+/// How much of a payment settles which invoice. The join that makes partial payment work.
+model PaymentAllocation {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+
+  paymentId String @db.Uuid
+  invoiceId String @db.Uuid
+
+  amount Decimal @db.Decimal(19, 4)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payment Payment @relation(fields: [paymentId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  invoice Invoice @relation(fields: [invoiceId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@unique([paymentId, invoiceId])
+  @@index([tenantId, invoiceId])
+  @@map("payment_allocation")
+}
+
+enum RefundStatus {
+  REQUESTED
+  APPROVED
+  REJECTED
+}
+
+/// Money going back out, under maker-checker.
+///
+/// The bursar holds PAYMENT_REFUND and the finance manager holds PAYMENT_REFUND_APPROVE —
+/// two different people, which is spec 134 and is exactly what the BURSAR role's own
+/// description says. The database refuses a self-approval outright rather than trusting the
+/// screen to hide the button, because one person who can both request and approve a refund
+/// can pay themselves.
+///
+/// NOTE: this records the decision. Actually moving the money is a treasury operation that
+/// needs the ledger, which does not exist yet.
+model Refund {
+  id       String @id @default(uuid(7)) @db.Uuid
+  tenantId String @db.Uuid
+
+  paymentId String @db.Uuid
+
+  amount   Decimal @db.Decimal(19, 4)
+  currency String  @db.Char(3)
+  reason   String
+
+  status RefundStatus @default(REQUESTED)
+
+  requestedByMembershipId String    @db.Uuid
+  requestedAt             DateTime  @default(now())
+  decidedByMembershipId   String?   @db.Uuid
+  decidedAt               DateTime?
+  decisionNote            String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant  Tenant  @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  payment Payment @relation(fields: [paymentId, tenantId], references: [id, tenantId], onDelete: Restrict)
+
+  @@index([tenantId, status])
+  @@map("refund")
 }
