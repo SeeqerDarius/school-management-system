@@ -4,6 +4,8 @@ import { withRlsTransaction } from '@/server/tenant-scope';
 import { requirePermission } from '@/server/auth/session';
 import { P } from '@/lib/permissions';
 import { studentReach, studentsInReach } from '@/lib/student-reach';
+import { isFamilyPrincipal } from '@/lib/student-visibility';
+import { requireActiveSession } from '@/server/auth/session';
 import { studentListQuerySchema } from './schema';
 import type { StudentListQuery } from './schema';
 import { z } from 'zod';
@@ -18,7 +20,12 @@ import { z } from 'zod';
  */
 export async function getStudents(input: StudentListQuery = { page: 1, limit: 20 }) {
   const query = studentListQuerySchema.parse(input);
-  const session = await requirePermission(P.STUDENT_READ);
+  // A family principal is admitted without STUDENT_READ and then narrowed to their own
+  // children by reach below. Staff still need the permission.
+  const probe = await requireActiveSession();
+  const session = isFamilyPrincipal(probe.principalType)
+    ? probe
+    : await requirePermission(P.STUDENT_READ);
   const { tenantId } = session;
 
   // STUDENT_READ says this person may use the admissions screens. It does NOT say which
@@ -100,7 +107,10 @@ export async function getStudents(input: StudentListQuery = { page: 1, limit: 20
  */
 export async function getStudentById(id: string) {
   const studentId = z.string().uuid().parse(id);
-  const session = await requirePermission(P.STUDENT_READ);
+  const probe = await requireActiveSession();
+  const session = isFamilyPrincipal(probe.principalType)
+    ? probe
+    : await requirePermission(P.STUDENT_READ);
   const { tenantId } = session;
 
   // Same reach, applied to one child. findFirst rather than findUnique because the clause is

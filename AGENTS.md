@@ -67,6 +67,7 @@ npm run build               # production build
 npm run db:migrate          # create and apply a migration — refuses a non-local database
 npm run db:deploy           # apply existing migrations (CI and production). Only ever adds
 npm run db:seed             # permission catalogue, system roles, demo school outside production
+npm run db:demo             # eight signed-in people across eight roles — local databases only
 npm run db:studio           # look at the data
 npm run db:reset            # drop and recreate — refuses a non-local database
 ```

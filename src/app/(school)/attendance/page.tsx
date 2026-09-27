@@ -1,7 +1,9 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 
-import { EmptyState, PageHeader, Panel, StatusBadge } from '@/components/ui';
+import { EmptyState, ErrorState, PageHeader, Panel, StatusBadge } from '@/components/ui';
+import { P } from '@/lib/permissions';
+import { requireActiveSession } from '@/server/auth/session';
 import { registersForDay, today, type RegisterSummary } from '@/features/attendance/data';
 import { attendanceRate } from '@/lib/attendance';
 
@@ -19,6 +21,19 @@ export default async function AttendancePage({
 }: {
   searchParams: Promise<{ date?: string }>;
 }) {
+  const guardSession = await requireActiveSession();
+  if (!guardSession.permissions.has(P.ATTENDANCE_VIEW)) {
+    return (
+      <main id="main" className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
+        <PageHeader title="Attendance" />
+        <ErrorState
+          title="Registers are not part of your role"
+          detail="A register is taken by the person standing in front of the class. If you need to see one, ask whoever administers this school."
+        />
+      </main>
+    );
+  }
+
   const { date } = await searchParams;
   const schoolToday = await today();
   const sessionDate = /^\d{4}-\d{2}-\d{2}$/.test(date ?? '') ? date! : schoolToday;

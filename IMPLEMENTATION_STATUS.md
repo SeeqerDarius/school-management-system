@@ -37,6 +37,9 @@ deployment until an operator repoints `DATABASE_URL` at the restricted role — 
 | Database invariants | Ordering, non-overlap (exclusion constraints), one-current partial unique indexes, closure recorded, system role code uniqueness | `prisma/migrations/20260919091000_*` |
 | CI | Secret scan, typecheck, lint, unit tests, build, migrations against real PostgreSQL, drift check, idempotent-seed check, tenant isolation suite | `.github/workflows/ci.yml` |
 | Data API lockdown | Deny-all RLS on every table plus REVOKE from `anon`/`authenticated`, idempotent and portable to plain PostgreSQL | `prisma/migrations/20260919092000_data_api_lockdown` |
+| Classes, enrolment and attendance | A class group per academic year with a class teacher whose assignment decides who may take that register; the daily register with mark, submit, correct and lock. A LOCKED register is final for everybody and a register cannot be submitted while a child on the roll has no mark, both as `SECURITY DEFINER` triggers | `src/features/classes/**`, `src/features/attendance/**` |
+| Fees and invoicing | Fee items and effective-dated price lists; a termly invoice run per class; issue, cancel, credit note; payments with oldest-first allocation, partial payment and credit on account; refunds under maker-checker. Money is `numeric(19,4)` with an explicit currency and a `string` end to end in TypeScript | `src/features/fees/**`, `src/lib/money.ts` |
+| Demo accounts | `npm run db:demo` seeds eight people across eight roles, two classes, eight children, a submitted register, a live price list, issued invoices and a partial payment. Refuses any non-local database, because the password is published in the file | `prisma/seed-demo.ts` |
 | Invitations | Issue an invitation (creates the user with no password, the membership as INVITED, and a single-use 256-bit token stored only as a digest), redeem it to set a password and activate the membership. Screens for both. Delivery is by passing the link on — email is not wired | `src/features/people/**`, `src/lib/invitation.ts` |
 | Sign-in throttling | Escalating lockout per account and per client address, counted from `security_event` and checked before the bcrypt compare; a refusal is logged under its own event type so a lock cannot be held open | `src/server/auth/throttle.ts`, `src/lib/sign-in-throttle.ts` |
 | Content-Security-Policy | Per-request nonce with `strict-dynamic`, issued from middleware; `base-uri`, `form-action`, `object-src` and `frame-ancestors` closed | `src/middleware.ts` |
@@ -228,3 +231,43 @@ seeded users or a browser test, and neither exists.
 
 There is no coverage threshold. A percentage would measure lines executed, not behaviour asserted,
 and the number would be met long before the things above were tested.
+
+---
+
+### Access was only ever exercised as one person, until it wasn't
+
+Six defects were found by signing in as eight different people, and not one of them would have
+been caught by any test in this repository — because every test and every browser run until
+then used a single administrator holding every permission at once.
+
+Three were found the first time the demo accounts existed, on the previous stack:
+
+- **A guardian could read any class roster**, every child's name and reference included.
+- **A bursar could not open the fees module at all** — a 500 naming a permission the screen
+  never mentions.
+- **Every navigation link was shown to everybody**, including doors that were always locked.
+
+Three more were found by re-running that sweep against this one:
+
+- **`/students` returned a 500 to six of the eight accounts.** `getStudents()` threw
+  `PermissionDeniedError` rather than the page saying no, so the headmaster, the bursar, the
+  finance manager, the registrar and both class teachers got a support reference instead of a
+  sentence.
+- **A guardian could not see their own children.** The admissions reads required
+  `STUDENT_READ`, which a parent does not hold — but a parent's access is by *relationship*,
+  not by permission, which is the whole principle `student-reach.ts` is built on.
+- **The fee module queried a relation that does not exist on this schema** (`guardians` rather
+  than `guardianships`), so a parent opening Fees got a Prisma validation error. Typecheck
+  cannot catch a Prisma relation name in a `where` clause, and no unit test covered the
+  guardian branch.
+
+The pattern behind all six is the same and worth stating because it will recur: **a permission
+check written while thinking about one role is a check that has only been tried by that role.**
+
+**Still only exercised by hand.** The sweep that found these is an ad-hoc script; there is no
+automated multi-role test in the repository. A Playwright spec per role, asserting what each
+one is *refused*, is the missing piece and is not written.
+
+**Known and unresolved, because it is seed data rather than code:** `CLASS_TEACHER` and
+`HEADMASTER` do not hold `STUDENT_READ`, so neither can open the student register, while a
+plain `TEACHER` can. That reads as inverted, and changing it means changing granted roles.

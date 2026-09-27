@@ -59,7 +59,7 @@ function studentsInReach(reach: FeeReach) {
     case 'OWN_CHILDREN':
       // A revoked guardian link confers nothing, here as everywhere else. A parent a court has
       // excluded stops seeing the fee ledger on the next page load.
-      return { guardians: { some: { guardianId: reach.guardianId, revokedAt: null } } };
+      return { guardianships: { some: { guardianId: reach.guardianId, revokedAt: null } } };
     case 'OWN':
       return { id: reach.studentId };
     case 'NONE':

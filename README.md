@@ -142,6 +142,7 @@ academic calendar.
 | `npm run db:migrate` | Create and apply a migration — refuses any non-local database |
 | `npm run db:deploy` | Apply existing migrations (this is what CI and production run) |
 | `npm run db:seed` | Permission catalogue, system roles, and a demo school outside production |
+| `npm run db:demo` | Eight people across eight roles, and data for them to disagree about. Refuses any database that is not local |
 | `npm run db:reset` | Drop and recreate — refuses any non-local database |
 | `npm run db:studio` | Prisma Studio, for looking at the data |
 
