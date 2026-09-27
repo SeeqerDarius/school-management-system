@@ -41,6 +41,7 @@ deployment until an operator repoints `DATABASE_URL` at the restricted role — 
 | Fees and invoicing | Fee items and effective-dated price lists; a termly invoice run per class; issue, cancel, credit note; payments with oldest-first allocation, partial payment and credit on account; refunds under maker-checker. Money is `numeric(19,4)` with an explicit currency and a `string` end to end in TypeScript | `src/features/fees/**`, `src/lib/money.ts` |
 | Demo accounts | `npm run db:demo` seeds eight people across eight roles, two classes, eight children, a submitted register, a live price list, issued invoices and a partial payment. Refuses any non-local database, because the password is published in the file | `prisma/seed-demo.ts` |
 | Invitations | Issue an invitation (creates the user with no password, the membership as INVITED, and a single-use 256-bit token stored only as a digest), redeem it to set a password and activate the membership. Screens for both. Delivery is by passing the link on — email is not wired | `src/features/people/**`, `src/lib/invitation.ts` |
+| Changing your own password | **Your account** verifies the current password, refuses reuse, rewrites the hash at bcrypt cost 12 and advances `sessionsValidFrom`, so every session ends including the one that made the change. Gated on identity rather than a permission — the resource is the actor. Writes an audit entry carrying no hash, and a `PASSWORD_CHANGE_REFUSED` security event on a wrong current password | `src/features/account/**` |
 | Sign-in throttling | Escalating lockout per account and per client address, counted from `security_event` and checked before the bcrypt compare; a refusal is logged under its own event type so a lock cannot be held open | `src/server/auth/throttle.ts`, `src/lib/sign-in-throttle.ts` |
 | Content-Security-Policy | Per-request nonce with `strict-dynamic`, issued from middleware; `base-uri`, `form-action`, `object-src` and `frame-ancestors` closed | `src/middleware.ts` |
 | Tenant isolation in the database | Per-tenant policies on every table carrying `tenantId`, read by a transaction-bound `app.tenant_id`; a `NOBYPASSRLS` role to connect as. Not live until an operator repoints `DATABASE_URL` | `prisma/migrations/20260920000000_rls_tenant_isolation`, `prisma/migrations/20260921030000_tenant_rls_policies`, `src/server/db-context.ts` |
@@ -95,6 +96,12 @@ Three limits worth knowing:
 
 - **It covers the sign-in path only.** §84 also asks for limits on exports, messaging, SMS
   dispatch, payment initiation and file upload. Those arrive with the modules that need them.
+  **Changing a password is in this gap too**: the action verifies the current password with no
+  limit on how often it may be guessed. Reaching it needs a valid session, so the attacker
+  already holds the account and the prize is locking the owner out rather than getting in —
+  which is why it is a bullet here and not a release blocker. Each refusal is recorded as
+  `PASSWORD_CHANGE_REFUSED` with a reason, so it is visible; nothing yet acts on it. Counting
+  that event is the same shape as `sign-in-throttle.ts` counting `SIGN_IN_FAILED`.
 - **It trusts the proxy's forwarded address.** `x-vercel-forwarded-for` cannot be set by a
   caller, but the fallback `x-forwarded-for` can — so the application must be unreachable except
   through Vercel. Expose it directly and a forged header earns a fresh allowance per fabricated
@@ -105,7 +112,24 @@ Three limits worth knowing:
   that a throttled attempt is recorded as `SIGN_IN_THROTTLED` and is *not* counted as a failure,
   so the lock always decays rather than being held open indefinitely by continued knocking.
 
-### 3. No breached-password check
+### 3. Nobody can reset a password they have forgotten
+
+A signed-in person can change their password from **Your account**, which is the common case and
+is driven end to end in a browser. Somebody who is *locked out* has no route at all: they must
+ask a school administrator to re-invite them. That does work — redeeming an invitation sets a new
+password — but it puts an administrator in the loop for every forgotten password, and on a
+Saturday it puts nobody in the loop.
+
+The machinery is mostly present. `src/lib/invitation.ts` already issues single-use expiring
+tokens stored only as a digest, and the `inviteTokenHash` column is documented as "set when a
+school invites someone **or a password reset is requested**". What is missing is the anonymous
+request route and, underneath it, an email provider — a reset link shown on screen to whoever
+typed the address would hand any visitor a password reset for any address they can name.
+
+*What it takes:* the email provider in gap 6, then a request route that always reports the same
+thing whether or not the address exists.
+
+### 4. No breached-password check
 
 Firebase did this. Nothing replaced it. A parent can currently set a password that appears in every
 credential-stuffing list in circulation.
@@ -113,7 +137,7 @@ credential-stuffing list in circulation.
 *What it takes:* the Have I Been Pwned range API — k-anonymity, so no password or full hash leaves
 the server — checked at password set time.
 
-### 4. The Content-Security-Policy still allows inline styles
+### 5. The Content-Security-Policy still allows inline styles
 
 `script-src` is nonce-based with `strict-dynamic`, and a browser was used to confirm it: a
 parser-inserted `<script>` spliced into the page — inline and by `src` — is refused, while the
@@ -125,7 +149,7 @@ font loading and nonce-ing them is not reliably supported. Injected CSS can rest
 exfiltrate through selectors; it cannot execute. That makes it a smaller hole than the one that
 closed, but it is a hole and it is not being described as anything else.
 
-### 5. Invitations work, but nothing emails them
+### 6. Invitations work, but nothing emails them
 
 A school admin can invite somebody from **People**, and that person sets a password and signs in.
 Driven end to end in a browser: invite issued, link redeemed in a clean session, the invited
@@ -145,7 +169,7 @@ somebody's access from the UI yet. Ending a membership is tenant-owned and strai
 reason it is not here is that it is membership management rather than invitation, and it wants
 its own change with a confirmation step.
 
-### 6. No error tracking, no uptime monitoring, no independent backup
+### 7. No error tracking, no uptime monitoring, no independent backup
 
 Failures reach Vercel's function logs and nowhere else; nobody is paged.
 
@@ -155,13 +179,13 @@ that is resolved there is **no recovery path from a destructive migration** beyo
 project's plan provides — which is why `db:reset` and `db:migrate` now refuse any non-local host
 (`scripts/guard-local-db.mjs`), and why `docs/DEPLOYMENT.md` no longer promises one.
 
-### 7. CodeQL results are not enforced
+### 8. CodeQL results are not enforced
 
 `.github/workflows/codeql.yml` carries `continue-on-error: true` on the upload step, because
 publishing to the Security tab on a private repository needs GitHub Advanced Security. A genuine
 CodeQL failure is currently tolerated. Remove that line the moment code scanning is enabled.
 
-### 8. Four documents still describe the retired stack
+### 9. Four documents still describe the retired stack
 
 `docs/THREAT_MODEL.md`, `docs/TESTING.md`, `docs/DATA_PRIVACY.md` and
 `docs/INCIDENT_RESPONSE.md` were written for the Java, Firebase and Flyway architecture. Each now
@@ -171,7 +195,7 @@ cannot tell which half you are reading.
 
 The threat model is the one that matters most: it describes row-level security as in place.
 
-### 9. Architecture rules are weaker than they were
+### 10. Architecture rules are weaker than they were
 
 ArchUnit enforced module boundaries and a no-float-for-money rule that ESLint cannot express. Those
 invariants are now held by review and by the tests named above.

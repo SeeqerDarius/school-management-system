@@ -81,6 +81,17 @@ export default async function SchoolLayout({
             <span className="max-w-[12rem] truncate text-sm text-[var(--color-ink-muted)]">
               {session.tenantName}
             </span>
+            {/* No permission gate, unlike the section nav above. Everybody who can see this
+                header has an account, and changing your own password is not a capability a
+                school grants — it is the one thing every signed-in person may always do. */}
+            <Link
+              href="/settings/account"
+              className="rounded-[var(--radius-control)] px-2.5 py-1.5 text-sm
+                         text-[var(--color-ink-muted)] hover:bg-[var(--color-surface-sunken)]
+                         hover:text-[var(--color-ink)]"
+            >
+              Your account
+            </Link>
             <Link
               href="/choose-school"
               className="rounded-[var(--radius-control)] px-2.5 py-1.5 text-sm
